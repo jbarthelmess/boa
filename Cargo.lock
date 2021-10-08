@@ -84,6 +84,7 @@ dependencies = [
  "boa_profiler",
  "boa_unicode",
  "chrono",
+ "const-utf16",
  "criterion",
  "dyn-clone",
  "fast-float",
@@ -96,6 +97,7 @@ dependencies = [
  "icu_provider",
  "icu_testdata",
  "indexmap",
+ "itertools",
  "jemallocator",
  "num-bigint",
  "num-integer",
@@ -107,6 +109,8 @@ dependencies = [
  "ryu-js",
  "serde",
  "serde_json",
+ "sptr",
+ "static_assertions",
  "sys-locale",
  "tap",
  "unicode-normalization",
@@ -318,6 +322,12 @@ dependencies = [
  "lazy_static",
  "winapi",
 ]
+
+[[package]]
+name = "const-utf16"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90feefab165fe011746e3be2f0708b7b180fcbd9f5054ff81a454d7bd93d8285"
 
 [[package]]
 name = "criterion"
@@ -1490,6 +1500,12 @@ checksum = "f2dd574626839106c320a323308629dcb1acfc96e32a8cba364ddc61ac23ee83"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "sptr"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
 
 [[package]]
 name = "stable_deref_trait"
