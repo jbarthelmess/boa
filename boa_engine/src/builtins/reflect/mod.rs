@@ -16,6 +16,7 @@ use crate::{
     object::{JsObject, ObjectInitializer},
     property::Attribute,
     symbol::WellKnownSymbols,
+    value::JsVariant,
     Context, JsResult, JsValue,
 };
 use boa_profiler::Profiler;
@@ -86,7 +87,7 @@ impl Reflect {
             return context.throw_type_error("target must be a function");
         }
         let args = args_list.create_list_from_array_like(&[], context)?;
-        target.call(this_arg, &args, context)
+        target.call(&this_arg, &args, context)
     }
 
     /// Calls a target function as a constructor with arguments.
@@ -113,7 +114,12 @@ impl Reflect {
         }
 
         let new_target = if let Some(new_target) = args.get(2) {
-            if new_target.as_object().map(JsObject::is_constructor) != Some(true) {
+            if new_target
+                .as_object()
+                .as_deref()
+                .map(JsObject::is_constructor)
+                != Some(true)
+            {
                 return context.throw_type_error("newTarget must be constructor");
             }
             new_target.clone()
@@ -145,7 +151,7 @@ impl Reflect {
         let key = args.get_or_undefined(1).to_property_key(context)?;
         let prop_desc: JsValue = args
             .get(2)
-            .and_then(|v| v.as_object().cloned())
+            .and_then(|v| v.as_object().as_deref().cloned())
             .ok_or_else(|| context.construct_type_error("property descriptor must be an object"))?
             .into();
 
@@ -248,7 +254,7 @@ impl Reflect {
             .ok_or_else(|| context.construct_type_error("target must be an object"))?;
         Ok(target
             .__get_prototype_of__(context)?
-            .map_or(JsValue::Null, JsValue::new))
+            .map_or(JsValue::null(), JsValue::new))
     }
 
     /// Returns `true` if the object has the property, `false` otherwise.
@@ -381,9 +387,9 @@ impl Reflect {
             .get(0)
             .and_then(JsValue::as_object)
             .ok_or_else(|| context.construct_type_error("target must be an object"))?;
-        let proto = match args.get_or_undefined(1) {
-            JsValue::Object(obj) => Some(obj.clone()),
-            JsValue::Null => None,
+        let proto = match args.get_or_undefined(1).variant() {
+            JsVariant::Object(obj) => Some(obj.clone()),
+            JsVariant::Null => None,
             _ => return context.throw_type_error("proto must be an object or null"),
         };
         Ok(target.__set_prototype_of__(proto, context)?.into())

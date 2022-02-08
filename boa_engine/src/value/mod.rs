@@ -1,3 +1,5 @@
+#![warn(unsafe_op_in_unsafe_fn)]
+#![allow(unstable_name_collisions)]
 //! This module implements the JavaScript Value.
 //!
 //! Javascript values, utility methods and conversion between Javascript values and Rust values.
@@ -21,9 +23,13 @@ use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::Zero;
 use once_cell::sync::Lazy;
+use sptr::Strict;
 use std::{
+    cell::Cell,
     collections::HashSet,
     fmt::{self, Display},
+    marker::PhantomData,
+    mem::ManuallyDrop,
     ops::Sub,
     str::FromStr,
 };
@@ -55,27 +61,65 @@ static TWO_E_63: Lazy<BigInt> = Lazy::new(|| {
     BigInt::from(TWO_E_63)
 });
 
-/// A Javascript value
-#[derive(Trace, Finalize, Debug, Clone)]
-pub enum JsValue {
-    /// `null` - A null value, for when a value doesn't exist.
-    Null,
-    /// `undefined` - An undefined value, for when a field or index doesn't exist.
-    Undefined,
-    /// `boolean` - A `true` / `false` value, for if a certain criteria is met.
-    Boolean(bool),
-    /// `String` - A UTF-8 string, such as `"Hello, world"`.
-    String(JsString),
-    /// `Number` - A 64-bit floating point number, such as `3.1415`
-    Rational(f64),
-    /// `Number` - A 32-bit integer, such as `42`.
-    Integer(i32),
-    /// `BigInt` - holds any arbitrary large signed integer.
-    BigInt(JsBigInt),
-    /// `Object` - An object, such as `Math`, represented by a binary tree of string keys to Javascript values.
-    Object(JsObject),
-    /// `Symbol` - A Symbol Primitive type.
-    Symbol(JsSymbol),
+const SIGN_BIT: u64 = 0x8000000000000000;
+const EXPONENT: u64 = 0x7FF0000000000000;
+// const MANTISA: u64 = 0x0008000000000000;
+const SIGNAL_BIT: u64 = 0x0008000000000000;
+const QNAN: u64 = EXPONENT | SIGNAL_BIT; // 0x7FF8000000000000
+
+pub const CANONICALIZED_NAN: u64 = QNAN;
+// const PAYLOAD: u64 = 0x00007FFFFFFFFFFF;
+// const TYPE: u64 = !PAYLOAD;
+
+pub const TAG_MASK: u64 = 0xFFFF_0000_0000_0000;
+
+pub const DOUBLE_TYPE: u64 = QNAN;
+pub const INTEGER_TYPE: u64 = QNAN | (0b001 << 48);
+pub const BOOLEAN_TYPE: u64 = QNAN | (0b010 << 48);
+pub const UNDEFINED_TYPE: u64 = QNAN | (0b011 << 48);
+pub const NULL_TYPE: u64 = QNAN | (0b100 << 48);
+
+pub const RESERVED1_TYPE: u64 = QNAN | (0b101 << 48);
+pub const RESERVED2_TYPE: u64 = QNAN | (0b110 << 48);
+pub const RESERVED3_TYPE: u64 = QNAN | (0b111 << 48);
+
+pub const POINTER_TYPE: u64 = SIGN_BIT | QNAN;
+pub const OBJECT_TYPE: u64 = POINTER_TYPE | (0b001 << 48);
+pub const STRING_TYPE: u64 = POINTER_TYPE | (0b010 << 48);
+pub const SYMBOL_TYPE: u64 = POINTER_TYPE | (0b011 << 48);
+pub const BIGINT_TYPE: u64 = POINTER_TYPE | (0b100 << 48);
+
+pub const RESERVED4_TYPE: u64 = POINTER_TYPE | (0b101 << 48);
+pub const RESERVED5_TYPE: u64 = POINTER_TYPE | (0b110 << 48);
+pub const RESERVED6_TYPE: u64 = POINTER_TYPE | (0b111 << 48);
+
+pub const MASK_INT_PAYLOAD: u64 = 0x00000000FFFFFFFF;
+pub const MASK_POINTER_PAYLOAD: u64 = 0x0000FFFFFFFFFFFF;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum ValueTag {
+    Double = (DOUBLE_TYPE >> 48) as _,
+    Integer = (INTEGER_TYPE >> 48) as _,
+    Boolean = (BOOLEAN_TYPE >> 48) as _,
+    Undefined = (UNDEFINED_TYPE >> 48) as _,
+    Null = (NULL_TYPE >> 48) as _,
+    Object = (OBJECT_TYPE >> 48) as _,
+    String = (STRING_TYPE >> 48) as _,
+    Symbol = (SYMBOL_TYPE >> 48) as _,
+    BigInt = (BIGINT_TYPE >> 48) as _,
+    // Reserved1 = RESERVED1_TYPE,
+    // Reserved2 = RESERVED2_TYPE,
+    // Reserved3 = RESERVED3_TYPE,
+    // Reserved4 = RESERVED4_TYPE,
+    // Reserved5 = RESERVED5_TYPE,
+    // Reserved6 = RESERVED6_TYPE,
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct JsValue {
+    value: Cell<*mut ()>,
 }
 
 impl JsValue {
@@ -88,48 +132,725 @@ impl JsValue {
         value.into()
     }
 
-    /// Creates a new `undefined` value.
-    #[inline]
-    pub fn undefined() -> Self {
-        Self::Undefined
-    }
-
-    /// Creates a new `null` value.
-    #[inline]
-    pub fn null() -> Self {
-        Self::Null
+    fn tag(&self) -> ValueTag {
+        if self.is_rational() {
+            return ValueTag::Double;
+        }
+        unsafe { std::mem::transmute(((self.value.get().addr() & TAG_MASK as usize) >> 48) as u16) }
     }
 
     /// Creates a new number with `NaN` value.
     #[inline]
-    pub fn nan() -> Self {
-        Self::Rational(f64::NAN)
+    pub const fn nan() -> Self {
+        Self {
+            value: Cell::new(sptr::invalid_mut(CANONICALIZED_NAN as usize)),
+        }
     }
 
-    /// Creates a new number with `Infinity` value.
-    #[inline]
-    pub fn positive_infinity() -> Self {
-        Self::Rational(f64::INFINITY)
+    pub fn is_nan(&self) -> bool {
+        self.value.get().addr() as u64 == CANONICALIZED_NAN
     }
 
-    /// Creates a new number with `-Infinity` value.
+    /// Creates a new `undefined` value.
     #[inline]
-    pub fn negative_infinity() -> Self {
-        Self::Rational(f64::NEG_INFINITY)
+    pub const fn undefined() -> Self {
+        Self {
+            value: Cell::new(sptr::invalid_mut(UNDEFINED_TYPE as usize)),
+        }
+    }
+
+    /// Returns true if the value is undefined.
+    #[inline]
+    pub fn is_undefined(&self) -> bool {
+        self.value.get().addr() as u64 == UNDEFINED_TYPE
+    }
+
+    /// Creates a new `null` value.
+    #[inline]
+    pub const fn null() -> Self {
+        Self {
+            value: Cell::new(sptr::invalid_mut(NULL_TYPE as usize)),
+        }
+    }
+
+    /// Returns true if the value is null.
+    #[inline]
+    pub fn is_null(&self) -> bool {
+        self.value.get().addr() as u64 == NULL_TYPE
+    }
+
+    /// Returns true if the value is null or undefined.
+    #[inline]
+    pub fn is_null_or_undefined(&self) -> bool {
+        self.is_null() || self.is_undefined()
+    }
+
+    pub fn is_rational(&self) -> bool {
+        (self.value.get().addr() as u64 & !SIGN_BIT) <= QNAN
+    }
+
+    fn as_rational_unchecked(&self) -> f64 {
+        f64::from_bits(self.value.get().addr() as u64)
+    }
+
+    pub fn as_rational(&self) -> Option<f64> {
+        if self.is_rational() {
+            return Some(self.as_rational_unchecked());
+        }
+
+        None
+    }
+
+    pub fn is_i32(&self) -> bool {
+        self.value.get().addr() as u64 & TAG_MASK == INTEGER_TYPE
+    }
+
+    pub fn as_i32_uncheched(&self) -> i32 {
+        (self.value.get().addr() as u64 & MASK_INT_PAYLOAD) as u32 as i32
+    }
+
+    pub fn as_i32(&self) -> Option<i32> {
+        if self.is_i32() {
+            return Some(self.as_i32_uncheched());
+        }
+
+        None
+    }
+
+    /// Returns true if the value is a boolean.
+    #[inline]
+    pub fn is_boolean(&self) -> bool {
+        self.value.get().addr() as u64 & TAG_MASK == BOOLEAN_TYPE
+    }
+
+    pub fn as_boolean_uncheched(&self) -> bool {
+        (self.value.get().addr() as u64 & 0xFF) != 0
+    }
+
+    #[inline]
+    pub fn as_boolean(&self) -> Option<bool> {
+        if self.is_boolean() {
+            return Some(self.as_boolean_uncheched());
+        }
+
+        None
+    }
+
+    pub fn as_pointer(&self) -> *mut () {
+        self.value
+            .get()
+            .map_addr(|addr| addr & MASK_POINTER_PAYLOAD as usize)
     }
 
     /// Returns true if the value is an object
     #[inline]
     pub fn is_object(&self) -> bool {
-        matches!(self, Self::Object(_))
+        self.value.get().addr() as u64 & TAG_MASK == OBJECT_TYPE
+    }
+
+    /// Returns a reference to the boxed [`JsObject`] without checking
+    /// if the tag of `self` is valid.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with a [`JsValue`] that doesn't box
+    /// a [`JsObject`] is undefined behaviour.
+    pub unsafe fn as_object_unchecked(&self) -> Ref<'_, JsObject> {
+        unsafe { Ref::new(JsObject::from_void_ptr(self.as_pointer())) }
+    }
+
+    pub fn as_object(&self) -> Option<Ref<'_, JsObject>> {
+        if self.is_object() {
+            return unsafe { Some(self.as_object_unchecked()) };
+        }
+
+        None
+    }
+
+    /// Returns true if the value is a string.
+    #[inline]
+    pub fn is_string(&self) -> bool {
+        self.value.get().addr() as u64 & TAG_MASK == STRING_TYPE
+    }
+
+    /// Returns a reference to the boxed [`JsString`] without checking
+    /// if the tag of `self` is valid.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with a [`JsValue`] that doesn't box
+    /// a [`JsString`] is undefined behaviour.
+    pub unsafe fn as_string_unchecked(&self) -> Ref<'_, JsString> {
+        unsafe { Ref::new(JsString::from_void_ptr(self.as_pointer())) }
+    }
+
+    /// Returns the string if the values is a string, otherwise `None`.
+    #[inline]
+    pub fn as_string(&self) -> Option<Ref<'_, JsString>> {
+        if self.is_string() {
+            return unsafe { Some(self.as_string_unchecked()) };
+        }
+
+        None
+    }
+
+    pub fn is_symbol(&self) -> bool {
+        self.value.get().addr() as u64 & TAG_MASK == SYMBOL_TYPE
+    }
+
+    /// Returns a reference to the boxed [`JsSymbol`] without checking
+    /// if the tag of `self` is valid.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with a [`JsValue`] that doesn't box
+    /// a [`JsSymbol`] is undefined behaviour.
+    pub unsafe fn as_symbol_unchecked(&self) -> Ref<'_, JsSymbol> {
+        unsafe { Ref::new(JsSymbol::from_void_ptr(self.as_pointer())) }
+    }
+
+    pub fn as_symbol(&self) -> Option<Ref<'_, JsSymbol>> {
+        if self.is_symbol() {
+            return unsafe { Some(self.as_symbol_unchecked()) };
+        }
+
+        None
+    }
+
+    /// Returns true if the value is a bigint.
+    #[inline]
+    pub fn is_bigint(&self) -> bool {
+        self.value.get().addr() as u64 & TAG_MASK == BIGINT_TYPE
+    }
+
+    /// Returns a reference to the boxed [`JsBigInt`] without checking
+    /// if the tag of `self` is valid.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with a [`JsValue`] that doesn't box
+    /// a [`JsBigInt`] is undefined behaviour.
+    #[inline]
+    pub unsafe fn as_bigint_unchecked(&self) -> Ref<'_, JsBigInt> {
+        // SAFETY: The safety contract must be upheld by the caller
+        unsafe { Ref::new(JsBigInt::from_void_ptr(self.as_pointer())) }
+    }
+
+    pub fn as_bigint(&self) -> Option<Ref<'_, JsBigInt>> {
+        if self.is_bigint() {
+            return unsafe { Some(self.as_bigint_unchecked()) };
+        }
+
+        None
+    }
+
+    pub fn variant(&self) -> JsVariant<'_> {
+        unsafe {
+            match self.tag() {
+                ValueTag::Null => JsVariant::Null,
+                ValueTag::Undefined => JsVariant::Undefined,
+                ValueTag::Integer => JsVariant::Integer(self.as_i32_uncheched()),
+                ValueTag::Double => JsVariant::Rational(self.as_rational_unchecked()),
+                ValueTag::Boolean => JsVariant::Boolean(self.as_boolean_uncheched()),
+                ValueTag::Object => JsVariant::Object(self.as_object_unchecked()),
+                ValueTag::String => JsVariant::String(self.as_string_unchecked()),
+                ValueTag::Symbol => JsVariant::Symbol(self.as_symbol_unchecked()),
+                ValueTag::BigInt => JsVariant::BigInt(self.as_bigint_unchecked()),
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum JsVariant<'a> {
+    Null,
+    Undefined,
+    Rational(f64),
+    Integer(i32),
+    Boolean(bool),
+    String(Ref<'a, JsString>),
+    Symbol(Ref<'a, JsSymbol>),
+    BigInt(Ref<'a, JsBigInt>),
+    Object(Ref<'a, JsObject>),
+}
+
+impl From<bool> for JsValue {
+    #[inline]
+    fn from(value: bool) -> Self {
+        let value = Self {
+            value: Cell::new(sptr::invalid_mut(
+                usize::from(value) | BOOLEAN_TYPE as usize,
+            )),
+        };
+        debug_assert!(value.is_boolean());
+        debug_assert_eq!(value.tag(), ValueTag::Boolean);
+        value
+    }
+}
+
+impl From<i32> for JsValue {
+    #[inline]
+    fn from(value: i32) -> Self {
+        let value = Self {
+            value: Cell::new(sptr::invalid_mut(
+                value as u32 as usize | INTEGER_TYPE as usize,
+            )),
+        };
+        debug_assert!(value.is_integer());
+        debug_assert_eq!(value.tag(), ValueTag::Integer);
+        value
+    }
+}
+
+impl From<f64> for JsValue {
+    #[inline]
+    fn from(value: f64) -> Self {
+        if value.is_nan() {
+            return Self {
+                value: Cell::new(sptr::invalid_mut(CANONICALIZED_NAN as usize)),
+            };
+        }
+
+        let value = Self {
+            value: Cell::new(sptr::invalid_mut(value.to_bits() as usize)),
+        };
+        debug_assert!(value.is_rational());
+        debug_assert_eq!(value.tag(), ValueTag::Double);
+        value
+    }
+}
+
+impl From<JsString> for JsValue {
+    #[inline]
+    fn from(string: JsString) -> Self {
+        let string = ManuallyDrop::new(string);
+        let pointer = unsafe { JsString::into_void_ptr(string) };
+        debug_assert_eq!(
+            pointer.addr() & MASK_POINTER_PAYLOAD as usize,
+            pointer.addr()
+        );
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | STRING_TYPE as usize)),
+        };
+        debug_assert!(value.is_string());
+        debug_assert_eq!(value.tag(), ValueTag::String);
+        value
+    }
+}
+
+impl From<JsObject> for JsValue {
+    #[inline]
+    fn from(object: JsObject) -> Self {
+        let object = ManuallyDrop::new(object);
+        let pointer = unsafe { JsObject::into_void_ptr(object) };
+        debug_assert_eq!(
+            pointer.addr() & MASK_POINTER_PAYLOAD as usize,
+            pointer.addr()
+        );
+        debug_assert_eq!(OBJECT_TYPE & MASK_POINTER_PAYLOAD, 0);
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | OBJECT_TYPE as usize)),
+        };
+        debug_assert!(value.is_object());
+        debug_assert_eq!(value.tag(), ValueTag::Object);
+        value
+    }
+}
+
+impl From<JsSymbol> for JsValue {
+    #[inline]
+    fn from(symbol: JsSymbol) -> Self {
+        let symbol = ManuallyDrop::new(symbol);
+        let pointer = unsafe { JsSymbol::into_void_ptr(symbol) };
+        debug_assert_eq!(
+            pointer.addr() & MASK_POINTER_PAYLOAD as usize,
+            pointer.addr()
+        );
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | SYMBOL_TYPE as usize)),
+        };
+        debug_assert!(value.is_symbol());
+        debug_assert_eq!(value.tag(), ValueTag::Symbol);
+        value
+    }
+}
+
+impl From<JsBigInt> for JsValue {
+    #[inline]
+    fn from(bigint: JsBigInt) -> Self {
+        let bigint = ManuallyDrop::new(bigint);
+        let pointer = unsafe { JsBigInt::into_void_ptr(bigint) };
+        debug_assert_eq!(
+            pointer.addr() & MASK_POINTER_PAYLOAD as usize,
+            pointer.addr()
+        );
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | BIGINT_TYPE as usize)),
+        };
+        debug_assert!(value.is_bigint());
+        debug_assert_eq!(value.tag(), ValueTag::BigInt);
+        value
+    }
+}
+
+/// This abstracts over every pointer type boxed inside `NaN` values.
+///
+/// # Safety
+///
+/// Non-exhaustive list of situations that could cause undefined behaviour:
+/// - Returning an invalid `*mut ()`.
+/// - Returning a `ManuallyDrop<Self>` that doesn't correspond with the provided
+/// `ptr`.
+/// - Dropping `ty` before returning its pointer.
+pub(crate) unsafe trait PointerType {
+    unsafe fn from_void_ptr(ptr: *mut ()) -> ManuallyDrop<Self>;
+
+    unsafe fn into_void_ptr(ty: ManuallyDrop<Self>) -> *mut ();
+}
+
+/// Represents a reference to a boxed pointer type inside a [`JsValue`]
+///
+/// This is exclusively used to return references to [`JsString`], [`JsObject`],
+/// [`JsSymbol`] and [`JsBigInt`], since `NaN` boxing makes returning proper references
+/// difficult. It is mainly returned by the [`JsValue::variant`] method and the
+/// `as_` methods for checked casts to pointer types.
+///
+/// [`Ref`] implements [`Deref`][`std::ops::Deref`], which facilitates conversion
+/// to a proper [`reference`] by using the `ref` keyword or the
+/// [`Option::as_deref`][`std::option::Option::as_deref`] method.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Ref<'a, T> {
+    inner: ManuallyDrop<T>,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<T> Ref<'_, T> {
+    #[inline]
+    fn new(inner: ManuallyDrop<T>) -> Self {
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> std::borrow::Borrow<T> for Ref<'_, T> {
+    #[inline]
+    fn borrow(&self) -> &T {
+        &**self
+    }
+}
+
+// Lift `Ref` over `AsRef`, since implementing `AsRef<T>` would override the
+// `as_ref` implementations of `T`.
+impl<U, T> AsRef<U> for Ref<'_, T>
+where
+    T: AsRef<U>,
+{
+    #[inline]
+    fn as_ref(&self) -> &U {
+        <T as AsRef<U>>::as_ref(&*self)
+    }
+}
+
+impl<T> std::ops::Deref for Ref<'_, T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
+}
+
+impl<T: PartialEq> PartialEq<T> for Ref<'_, T> {
+    #[inline]
+    fn eq(&self, other: &T) -> bool {
+        &**self == other
+    }
+}
+
+impl Drop for JsValue {
+    #[inline]
+    fn drop(&mut self) {
+        unsafe {
+            match self.tag() {
+                ValueTag::Object => {
+                    ManuallyDrop::into_inner(JsObject::from_void_ptr(self.as_pointer()));
+                }
+                ValueTag::String => {
+                    ManuallyDrop::into_inner(JsString::from_void_ptr(self.as_pointer()));
+                }
+                ValueTag::Symbol => {
+                    ManuallyDrop::into_inner(JsSymbol::from_void_ptr(self.as_pointer()));
+                }
+                ValueTag::BigInt => {
+                    ManuallyDrop::into_inner(JsBigInt::from_void_ptr(self.as_pointer()));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Clone for JsValue {
+    #[inline]
+    fn clone(&self) -> Self {
+        unsafe {
+            match self.tag() {
+                ValueTag::Object => Self::new(self.as_object_unchecked().clone()),
+                ValueTag::String => Self::new(self.as_string_unchecked().clone()),
+                ValueTag::Symbol => Self::new(self.as_symbol_unchecked().clone()),
+                ValueTag::BigInt => Self::new(self.as_bigint_unchecked().clone()),
+                _ => Self {
+                    value: Cell::new(self.value.get()),
+                },
+            }
+        }
+    }
+}
+
+impl Finalize for JsValue {}
+
+unsafe impl Trace for JsValue {
+    unsafe fn trace(&self) {
+        if let Some(o) = self.as_object() {
+            // SAFETY: `self.as_object()` must always return a valid `JsObject
+            unsafe {
+                o.trace();
+            }
+        }
+    }
+
+    unsafe fn root(&self) {
+        if self.tag() == ValueTag::Object {
+            // SAFETY: Implementors of `PointerType` must guarantee the
+            // safety of both `from_void_ptr` and `into_void_ptr`
+            unsafe {
+                let o = JsObject::from_void_ptr(self.as_pointer());
+                o.root();
+                self.value
+                    .set(JsObject::into_void_ptr(o).map_addr(|addr| addr | OBJECT_TYPE as usize));
+            }
+        }
+    }
+
+    unsafe fn unroot(&self) {
+        if self.tag() == ValueTag::Object {
+            // SAFETY: Implementors of `PointerType` must guarantee the
+            // safety of both `from_void_ptr` and `into_void_ptr`
+            unsafe {
+                let o = JsObject::from_void_ptr(self.as_pointer());
+                o.unroot();
+                self.value
+                    .set(JsObject::into_void_ptr(o).map_addr(|addr| addr | OBJECT_TYPE as usize));
+            }
+        }
     }
 
     #[inline]
-    pub fn as_object(&self) -> Option<&JsObject> {
-        match *self {
-            Self::Object(ref o) => Some(o),
-            _ => None,
+    fn finalize_glue(&self) {
+        if let Some(o) = self.as_object() {
+            o.finalize_glue();
         }
+    }
+}
+#[cfg(test)]
+mod tests_nan_box {
+    use super::*;
+
+    #[test]
+    fn bigint() {
+        let value = JsValue::new(JsBigInt::new(12345));
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+        assert!(!value.is_rational());
+        assert!(!value.is_boolean());
+        assert!(!value.is_object());
+        assert!(!value.is_string());
+        assert!(!value.is_symbol());
+
+        assert!(value.is_bigint());
+
+        let bigint = value.as_bigint().unwrap();
+
+        assert_eq!(&bigint, &JsBigInt::new(12345));
+    }
+
+    #[test]
+    fn symbol() {
+        let value = JsValue::new(JsSymbol::new(Some("description...".into())));
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+        assert!(!value.is_rational());
+        assert!(!value.is_boolean());
+        assert!(!value.is_object());
+        assert!(!value.is_string());
+
+        assert!(value.is_symbol());
+
+        let symbol = value.as_symbol().unwrap();
+
+        assert_eq!(symbol.description(), Some("description...".into()));
+    }
+
+    #[test]
+    fn string() {
+        let value = JsValue::new("I am a string :)");
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+        assert!(!value.is_rational());
+        assert!(!value.is_boolean());
+        assert!(!value.is_object());
+
+        assert!(value.is_string());
+
+        let string = value.as_string().unwrap();
+
+        assert_eq!(JsString::refcount(&string), Some(1));
+
+        assert_eq!(*string, "I am a string :)");
+    }
+
+    #[test]
+    fn object() {
+        //let context = Context::default();
+
+        let o1 = JsObject::from_proto_and_data(None, ObjectData::ordinary());
+
+        // let value = JsValue::new(context.construct_object());
+        let value = JsValue::new(o1.clone());
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+        assert!(!value.is_rational());
+        assert!(!value.is_boolean());
+
+        assert!(value.is_object());
+
+        let o2 = value.as_object().unwrap();
+        assert!(JsObject::equals(&o1, &o2));
+    }
+
+    #[test]
+    fn boolean() {
+        let value = JsValue::new(true);
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+        assert!(!value.is_rational());
+
+        assert!(value.is_boolean());
+        assert_eq!(value.as_boolean(), Some(true));
+
+        let value = JsValue::new(false);
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+        assert!(!value.is_rational());
+
+        assert!(value.is_boolean());
+        assert_eq!(value.as_boolean(), Some(false));
+    }
+
+    #[test]
+    fn rational() {
+        let value = JsValue::new(1.3);
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+        assert!(!value.is_i32());
+
+        assert!(value.is_rational());
+        assert_eq!(value.as_rational(), Some(1.3));
+
+        let value = JsValue::new(f64::MAX);
+        assert!(value.is_rational());
+        assert_eq!(value.as_rational(), Some(f64::MAX));
+
+        let value = JsValue::new(f64::MIN);
+        assert!(value.is_rational());
+        assert_eq!(value.as_rational(), Some(f64::MIN));
+
+        let value = JsValue::nan();
+        assert!(value.is_rational());
+        assert!(value.as_rational().unwrap().is_nan());
+
+        let value = JsValue::new(12345);
+        assert!(!value.is_rational());
+        assert_eq!(value.as_rational(), None);
+
+        let value = JsValue::undefined();
+        assert!(!value.is_rational());
+        assert_eq!(value.as_rational(), None);
+
+        let value = JsValue::null();
+        assert!(!value.is_rational());
+        assert_eq!(value.as_rational(), None);
+    }
+
+    #[test]
+    fn undefined() {
+        let value = JsValue::undefined();
+
+        println!("{:?}", value);
+        println!("{:?}", UNDEFINED_TYPE);
+
+        assert!(value.is_undefined());
+    }
+
+    #[test]
+    fn null() {
+        let value = JsValue::null();
+
+        assert!(value.is_null());
+        assert!(value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+    }
+
+    #[test]
+    fn integer() {
+        let value = JsValue::new(-0xcafe);
+
+        assert!(!value.is_null());
+        assert!(!value.is_null_or_undefined());
+        assert!(!value.is_undefined());
+
+        assert!(value.is_i32());
+
+        assert_eq!(value.as_i32(), Some(-0xcafe));
+
+        let value = JsValue::null();
+        assert_eq!(value.as_i32(), None);
+    }
+}
+
+impl JsValue {
+    /// Creates a new number with `Infinity` value.
+    #[inline]
+    pub fn positive_infinity() -> Self {
+        Self::new(f64::INFINITY)
+    }
+
+    /// Creates a new number with `-Infinity` value.
+    #[inline]
+    pub fn negative_infinity() -> Self {
+        Self::new(f64::NEG_INFINITY)
     }
 
     /// It determines if the value is a callable function with a `[[Call]]` internal method.
@@ -140,60 +861,33 @@ impl JsValue {
     /// [spec]: https://tc39.es/ecma262/#sec-iscallable
     #[inline]
     pub fn is_callable(&self) -> bool {
-        matches!(self, Self::Object(obj) if obj.is_callable())
+        self.as_object()
+            .as_deref()
+            .map_or(false, JsObject::is_callable)
     }
 
     #[inline]
-    pub fn as_callable(&self) -> Option<&JsObject> {
+    pub fn as_callable(&self) -> Option<Ref<'_, JsObject>> {
         self.as_object().filter(|obj| obj.is_callable())
     }
 
     /// Returns true if the value is a constructor object
     #[inline]
     pub fn is_constructor(&self) -> bool {
-        matches!(self, Self::Object(obj) if obj.is_constructor())
+        self.as_object()
+            .as_deref()
+            .map_or(false, JsObject::is_constructor)
     }
 
     #[inline]
-    pub fn as_constructor(&self) -> Option<&JsObject> {
+    pub fn as_constructor(&self) -> Option<Ref<'_, JsObject>> {
         self.as_object().filter(|obj| obj.is_constructor())
-    }
-
-    /// Returns true if the value is a symbol.
-    #[inline]
-    pub fn is_symbol(&self) -> bool {
-        matches!(self, Self::Symbol(_))
-    }
-
-    pub fn as_symbol(&self) -> Option<JsSymbol> {
-        match self {
-            Self::Symbol(symbol) => Some(symbol.clone()),
-            _ => None,
-        }
-    }
-
-    /// Returns true if the value is undefined.
-    #[inline]
-    pub fn is_undefined(&self) -> bool {
-        matches!(self, Self::Undefined)
-    }
-
-    /// Returns true if the value is null.
-    #[inline]
-    pub fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
-    /// Returns true if the value is null or undefined.
-    #[inline]
-    pub fn is_null_or_undefined(&self) -> bool {
-        matches!(self, Self::Null | Self::Undefined)
     }
 
     /// Returns true if the value is a 64-bit floating-point number.
     #[inline]
     pub fn is_double(&self) -> bool {
-        matches!(self, Self::Rational(_))
+        self.is_rational()
     }
 
     /// Returns true if the value is integer.
@@ -204,68 +898,26 @@ impl JsValue {
         // equal to the original then it is an integer.
         let is_racional_intiger = |n: f64| n == f64::from(n as i32);
 
-        match *self {
-            Self::Integer(_) => true,
-            Self::Rational(n) if is_racional_intiger(n) => true,
-            _ => false,
+        if self.is_i32() {
+            true
+        } else if self.is_rational() {
+            is_racional_intiger(self.as_rational_unchecked())
+        } else {
+            false
         }
     }
 
     /// Returns true if the value is a number.
     #[inline]
     pub fn is_number(&self) -> bool {
-        matches!(self, Self::Rational(_) | Self::Integer(_))
+        self.is_i32() || self.is_rational()
     }
 
     #[inline]
     pub fn as_number(&self) -> Option<f64> {
-        match *self {
-            Self::Integer(integer) => Some(integer.into()),
-            Self::Rational(rational) => Some(rational),
-            _ => None,
-        }
-    }
-
-    /// Returns true if the value is a string.
-    #[inline]
-    pub fn is_string(&self) -> bool {
-        matches!(self, Self::String(_))
-    }
-
-    /// Returns the string if the values is a string, otherwise `None`.
-    #[inline]
-    pub fn as_string(&self) -> Option<&JsString> {
-        match self {
-            Self::String(ref string) => Some(string),
-            _ => None,
-        }
-    }
-
-    /// Returns true if the value is a boolean.
-    #[inline]
-    pub fn is_boolean(&self) -> bool {
-        matches!(self, Self::Boolean(_))
-    }
-
-    #[inline]
-    pub fn as_boolean(&self) -> Option<bool> {
-        match self {
-            Self::Boolean(boolean) => Some(*boolean),
-            _ => None,
-        }
-    }
-
-    /// Returns true if the value is a bigint.
-    #[inline]
-    pub fn is_bigint(&self) -> bool {
-        matches!(self, Self::BigInt(_))
-    }
-
-    /// Returns an optional reference to a `BigInt` if the value is a `BigInt` primitive.
-    #[inline]
-    pub fn as_bigint(&self) -> Option<&JsBigInt> {
-        match self {
-            Self::BigInt(bigint) => Some(bigint),
+        match self.variant() {
+            JsVariant::Integer(integer) => Some(integer.into()),
+            JsVariant::Rational(rational) => Some(rational),
             _ => None,
         }
     }
@@ -277,13 +929,13 @@ impl JsValue {
     ///
     /// [spec]: https://tc39.es/ecma262/#sec-toboolean
     pub fn to_boolean(&self) -> bool {
-        match *self {
-            Self::Symbol(_) | Self::Object(_) => true,
-            Self::String(ref s) if !s.is_empty() => true,
-            Self::Rational(n) if n != 0.0 && !n.is_nan() => true,
-            Self::Integer(n) if n != 0 => true,
-            Self::BigInt(ref n) if !n.is_zero() => true,
-            Self::Boolean(v) => v,
+        match self.variant() {
+            JsVariant::Symbol(_) | JsVariant::Object(_) => true,
+            JsVariant::String(s) if !s.is_empty() => true,
+            JsVariant::Rational(n) if n != 0.0 && !n.is_nan() => true,
+            JsVariant::Integer(n) if n != 0 => true,
+            JsVariant::BigInt(n) if !n.is_zero() => true,
+            JsVariant::Boolean(v) => v,
             _ => false,
         }
     }
@@ -297,28 +949,27 @@ impl JsValue {
     {
         let key = key.into();
         let _timer = Profiler::global().start_event("Value::get_property", "value");
-        match self {
-            Self::Object(ref object) => {
-                // TODO: had to skip `__get_own_properties__` since we don't have context here
-                let property = object.borrow().properties().get(&key).cloned();
-                if property.is_some() {
-                    return property;
-                }
-
-                object
-                    .prototype()
-                    .as_ref()
-                    .map_or(Self::Null, |obj| obj.clone().into())
-                    .get_property(key)
+        if let Some(object) = self.as_object() {
+            // TODO: had to skip `__get_own_properties__` since we don't have context here
+            let property = object.borrow().properties().get(&key).cloned();
+            if property.is_some() {
+                return property;
             }
-            _ => None,
+
+            object
+                .prototype()
+                .as_ref()
+                .map_or(Self::null(), |obj| obj.clone().into())
+                .get_property(key)
+        } else {
+            None
         }
     }
 
     /// Set the kind of an object.
     #[inline]
     pub fn set_data(&self, data: ObjectData) {
-        if let Self::Object(ref obj) = *self {
+        if let Some(obj) = self.as_object() {
             obj.borrow_mut().data = data;
         }
     }
@@ -333,9 +984,9 @@ impl JsValue {
     ) -> JsResult<Self> {
         // 1. Assert: input is an ECMAScript language value. (always a value not need to check)
         // 2. If Type(input) is Object, then
-        if self.is_object() {
+        if let Some(object) = self.as_object() {
             // a. Let exoticToPrim be ? GetMethod(input, @@toPrimitive).
-            let exotic_to_prim = self.get_method(WellKnownSymbols::to_primitive(), context)?;
+            let exotic_to_prim = object.get_method(WellKnownSymbols::to_primitive(), context)?;
 
             // b. If exoticToPrim is not undefined, then
             if let Some(exotic_to_prim) = exotic_to_prim {
@@ -369,9 +1020,7 @@ impl JsValue {
             };
 
             // d. Return ? OrdinaryToPrimitive(input, preferredType).
-            self.as_object()
-                .expect("self was not an object")
-                .ordinary_to_primitive(context, preferred_type)
+            object.ordinary_to_primitive(context, preferred_type)
         } else {
             // 3. Return input.
             Ok(self.clone())
@@ -385,10 +1034,11 @@ impl JsValue {
     ///
     /// [spec]: https://tc39.es/ecma262/#sec-tobigint
     pub fn to_bigint(&self, context: &mut Context) -> JsResult<JsBigInt> {
-        match self {
-            Self::Null => context.throw_type_error("cannot convert null to a BigInt"),
-            Self::Undefined => context.throw_type_error("cannot convert undefined to a BigInt"),
-            Self::String(ref string) => {
+        match self.variant() {
+            JsVariant::Null => context.throw_type_error("cannot convert null to a BigInt"),
+            JsVariant::Undefined => context.throw_type_error("cannot convert undefined to a BigInt"),
+            JsVariant::String(string) => {
+                let string = &*string;
                 if let Some(value) = JsBigInt::from_string(string) {
                     Ok(value)
                 } else {
@@ -397,17 +1047,17 @@ impl JsValue {
                     ))
                 }
             }
-            Self::Boolean(true) => Ok(JsBigInt::one()),
-            Self::Boolean(false) => Ok(JsBigInt::zero()),
-            Self::Integer(_) | Self::Rational(_) => {
+            JsVariant::Boolean(true) => Ok(JsBigInt::one()),
+            JsVariant::Boolean(false) => Ok(JsBigInt::zero()),
+            JsVariant::Integer(_) | JsVariant::Rational(_) => {
                 context.throw_type_error("cannot convert Number to a BigInt")
             }
-            Self::BigInt(b) => Ok(b.clone()),
-            Self::Object(_) => {
+            JsVariant::BigInt(b) => Ok(b.clone()),
+            JsVariant::Object(_) => {
                 let primitive = self.to_primitive(context, PreferredType::Number)?;
                 primitive.to_bigint(context)
             }
-            Self::Symbol(_) => context.throw_type_error("cannot convert Symbol to a BigInt"),
+            JsVariant::Symbol(_) => context.throw_type_error("cannot convert Symbol to a BigInt"),
         }
     }
 
@@ -437,16 +1087,16 @@ impl JsValue {
     ///
     /// This function is equivalent to `String(value)` in JavaScript.
     pub fn to_string(&self, context: &mut Context) -> JsResult<JsString> {
-        match self {
-            Self::Null => Ok("null".into()),
-            Self::Undefined => Ok("undefined".into()),
-            Self::Boolean(boolean) => Ok(boolean.to_string().into()),
-            Self::Rational(rational) => Ok(Number::to_native_string(*rational).into()),
-            Self::Integer(integer) => Ok(integer.to_string().into()),
-            Self::String(string) => Ok(string.clone()),
-            Self::Symbol(_) => context.throw_type_error("can't convert symbol to string"),
-            Self::BigInt(ref bigint) => Ok(bigint.to_string().into()),
-            Self::Object(_) => {
+        match self.variant() {
+            JsVariant::Null => Ok("null".into()),
+            JsVariant::Undefined => Ok("undefined".into()),
+            JsVariant::Boolean(boolean) => Ok(boolean.to_string().into()),
+            JsVariant::Rational(rational) => Ok(Number::to_native_string(rational).into()),
+            JsVariant::Integer(integer) => Ok(integer.to_string().into()),
+            JsVariant::String(string) => Ok(string.clone()),
+            JsVariant::Symbol(_) => context.throw_type_error("can't convert symbol to string"),
+            JsVariant::BigInt(bigint) => Ok(bigint.to_string().into()),
+            JsVariant::Object(_) => {
                 let primitive = self.to_primitive(context, PreferredType::String)?;
                 primitive.to_string(context)
             }
@@ -459,32 +1109,32 @@ impl JsValue {
     ///
     /// See: <https://tc39.es/ecma262/#sec-toobject>
     pub fn to_object(&self, context: &mut Context) -> JsResult<JsObject> {
-        match self {
-            Self::Undefined | Self::Null => {
+        match self.variant() {
+            JsVariant::Undefined | JsVariant::Null => {
                 context.throw_type_error("cannot convert 'null' or 'undefined' to object")
             }
-            Self::Boolean(boolean) => {
+            JsVariant::Boolean(boolean) => {
                 let prototype = context.intrinsics().constructors().boolean().prototype();
                 Ok(JsObject::from_proto_and_data(
                     prototype,
-                    ObjectData::boolean(*boolean),
+                    ObjectData::boolean(boolean),
                 ))
             }
-            Self::Integer(integer) => {
+            JsVariant::Integer(integer) => {
                 let prototype = context.intrinsics().constructors().number().prototype();
                 Ok(JsObject::from_proto_and_data(
                     prototype,
-                    ObjectData::number(f64::from(*integer)),
+                    ObjectData::number(f64::from(integer)),
                 ))
             }
-            Self::Rational(rational) => {
+            JsVariant::Rational(rational) => {
                 let prototype = context.intrinsics().constructors().number().prototype();
                 Ok(JsObject::from_proto_and_data(
                     prototype,
-                    ObjectData::number(*rational),
+                    ObjectData::number(rational),
                 ))
             }
-            Self::String(ref string) => {
+            JsVariant::String(string) => {
                 let prototype = context.intrinsics().constructors().string().prototype();
 
                 let object =
@@ -500,14 +1150,14 @@ impl JsValue {
                 );
                 Ok(object)
             }
-            Self::Symbol(ref symbol) => {
+            JsVariant::Symbol(symbol) => {
                 let prototype = context.intrinsics().constructors().symbol().prototype();
                 Ok(JsObject::from_proto_and_data(
                     prototype,
                     ObjectData::symbol(symbol.clone()),
                 ))
             }
-            Self::BigInt(ref bigint) => {
+            JsVariant::BigInt(bigint) => {
                 let prototype = context
                     .intrinsics()
                     .constructors()
@@ -518,7 +1168,7 @@ impl JsValue {
                     ObjectData::big_int(bigint.clone()),
                 ))
             }
-            Self::Object(jsobject) => Ok(jsobject.clone()),
+            JsVariant::Object(jsobject) => Ok(jsobject.clone()),
         }
     }
 
@@ -526,16 +1176,19 @@ impl JsValue {
     ///
     /// See <https://tc39.es/ecma262/#sec-topropertykey>
     pub fn to_property_key(&self, context: &mut Context) -> JsResult<PropertyKey> {
-        Ok(match self {
+        Ok(match self.variant() {
             // Fast path:
-            Self::String(string) => string.clone().into(),
-            Self::Symbol(symbol) => symbol.clone().into(),
+            JsVariant::String(string) => string.clone().into(),
+            JsVariant::Symbol(symbol) => symbol.clone().into(),
             // Slow path:
-            _ => match self.to_primitive(context, PreferredType::String)? {
-                Self::String(ref string) => string.clone().into(),
-                Self::Symbol(ref symbol) => symbol.clone().into(),
-                primitive => primitive.to_string(context)?.into(),
-            },
+            _ => {
+                let primitive = self.to_primitive(context, PreferredType::String)?;
+                match primitive.variant() {
+                JsVariant::String(string) => string.clone().into(),
+                JsVariant::Symbol(symbol) => symbol.clone().into(),
+                _ => primitive.to_string(context)?.into(),
+            }
+        },
         })
     }
 
@@ -557,7 +1210,7 @@ impl JsValue {
     /// See: <https://tc39.es/ecma262/#sec-touint32>
     pub fn to_u32(&self, context: &mut Context) -> JsResult<u32> {
         // This is the fast path, if the value is Integer we can just return it.
-        if let JsValue::Integer(number) = *self {
+        if let Some(number) = self.as_i32() {
             return Ok(number as u32);
         }
         let number = self.to_number(context)?;
@@ -570,7 +1223,7 @@ impl JsValue {
     /// See: <https://tc39.es/ecma262/#sec-toint32>
     pub fn to_i32(&self, context: &mut Context) -> JsResult<i32> {
         // This is the fast path, if the value is Integer we can just return it.
-        if let JsValue::Integer(number) = *self {
+        if let Some(number) = self.as_i32() {
             return Ok(number);
         }
         let number = self.to_number(context)?;
@@ -851,16 +1504,16 @@ impl JsValue {
     ///
     /// See: <https://tc39.es/ecma262/#sec-tonumber>
     pub fn to_number(&self, context: &mut Context) -> JsResult<f64> {
-        match *self {
-            Self::Null => Ok(0.0),
-            Self::Undefined => Ok(f64::NAN),
-            Self::Boolean(b) => Ok(if b { 1.0 } else { 0.0 }),
-            Self::String(ref string) => Ok(string.string_to_number()),
-            Self::Rational(number) => Ok(number),
-            Self::Integer(integer) => Ok(f64::from(integer)),
-            Self::Symbol(_) => context.throw_type_error("argument must not be a symbol"),
-            Self::BigInt(_) => context.throw_type_error("argument must not be a bigint"),
-            Self::Object(_) => {
+        match self.variant() {
+            JsVariant::Null => Ok(0.0),
+            JsVariant::Undefined => Ok(f64::NAN),
+            JsVariant::Boolean(b) => Ok(if b { 1.0 } else { 0.0 }),
+            JsVariant::String(string) => Ok(string.string_to_number()),
+            JsVariant::Rational(number) => Ok(number),
+            JsVariant::Integer(integer) => Ok(f64::from(integer)),
+            JsVariant::Symbol(_) => context.throw_type_error("argument must not be a symbol"),
+            JsVariant::BigInt(_) => context.throw_type_error("argument must not be a bigint"),
+            JsVariant::Object(_) => {
                 let primitive = self.to_primitive(context, PreferredType::Number)?;
                 primitive.to_number(context)
             }
@@ -920,15 +1573,15 @@ impl JsValue {
     ///
     /// [spec]: https://tc39.es/ecma262/#sec-typeof-operator
     pub fn type_of(&self) -> JsString {
-        match *self {
-            Self::Rational(_) | Self::Integer(_) => "number",
-            Self::String(_) => "string",
-            Self::Boolean(_) => "boolean",
-            Self::Symbol(_) => "symbol",
-            Self::Null => "object",
-            Self::Undefined => "undefined",
-            Self::BigInt(_) => "bigint",
-            Self::Object(ref object) => {
+        match self.variant() {
+            JsVariant::Rational(_) | JsVariant::Integer(_) => "number",
+            JsVariant::String(_) => "string",
+            JsVariant::Boolean(_) => "boolean",
+            JsVariant::Symbol(_) => "symbol",
+            JsVariant::Null => "object",
+            JsVariant::Undefined => "undefined",
+            JsVariant::BigInt(_) => "bigint",
+            JsVariant::Object(object) => {
                 if object.is_callable() {
                     "function"
                 } else {
@@ -964,7 +1617,7 @@ impl JsValue {
 
 impl Default for JsValue {
     fn default() -> Self {
-        Self::Undefined
+        Self::undefined()
     }
 }
 

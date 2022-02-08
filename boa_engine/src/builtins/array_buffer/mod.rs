@@ -244,7 +244,7 @@ impl ArrayBuffer {
         let new = ctor.construct(&[new_len.into()], &ctor.clone().into(), context)?;
 
         // 17. Perform ? RequireInternalSlot(new, [[ArrayBufferData]]).
-        let new_obj = new.as_object().cloned().ok_or_else(|| {
+        let new_obj = new.as_object().as_deref().cloned().ok_or_else(|| {
             context.construct_type_error("ArrayBuffer constructor returned non-object value")
         })?;
 
@@ -332,7 +332,7 @@ impl ArrayBuffer {
         obj.borrow_mut().data = ObjectData::array_buffer(Self {
             array_buffer_data: Some(block),
             array_buffer_byte_length: byte_length,
-            array_buffer_detach_key: JsValue::Undefined,
+            array_buffer_detach_key: JsValue::undefined(),
         });
 
         // 5. Return obj.

@@ -874,6 +874,7 @@ mod in_operator {
                 .get("prototype", &mut context)
                 .unwrap()
                 .as_object()
+                .as_deref()
                 .cloned())
         );
     }

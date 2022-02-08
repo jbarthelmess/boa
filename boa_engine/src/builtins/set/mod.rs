@@ -200,7 +200,7 @@ impl Set {
         if let Some(object) = this.as_object() {
             if let Some(set) = object.borrow_mut().as_set_mut() {
                 set.add(if value.as_number().map_or(false, |n| n == -0f64) {
-                    JsValue::Integer(0)
+                    JsValue::new(0)
                 } else {
                     value.clone()
                 });
@@ -257,7 +257,7 @@ impl Set {
 
         let res = if let Some(object) = this.as_object() {
             if let Some(set) = object.borrow_mut().as_set_mut() {
-                set.delete(value)
+                set.delete(&value)
             } else {
                 return context.throw_type_error("'this' is not a Set");
             }
@@ -350,7 +350,7 @@ impl Set {
             index += 1;
         }
 
-        Ok(JsValue::Undefined)
+        Ok(JsValue::undefined())
     }
 
     /// `Map.prototype.has( key )`
@@ -374,7 +374,7 @@ impl Set {
             .and_then(|obj| {
                 obj.borrow()
                     .as_set_ref()
-                    .map(|set| set.contains(value).into())
+                    .map(|set| set.contains(&value).into())
             })
             .ok_or_else(|| context.construct_type_error("'this' is not a Set"))
     }

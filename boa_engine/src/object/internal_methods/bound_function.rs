@@ -1,4 +1,4 @@
-use crate::{object::JsObject, Context, JsResult, JsValue};
+use crate::{object::JsObject, value::JsVariant, Context, JsResult, JsValue};
 
 use super::{InternalObjectMethods, ORDINARY_INTERNAL_METHODS};
 
@@ -89,8 +89,10 @@ fn bound_function_exotic_construct(
     args.extend_from_slice(arguments_list);
 
     // 5. If SameValue(F, newTarget) is true, set newTarget to target.
-    let new_target = match new_target {
-        JsValue::Object(new_target) if JsObject::equals(obj, new_target) => target.clone().into(),
+    let new_target = match new_target.variant() {
+        JsVariant::Object(ref new_target) if JsObject::equals(obj, new_target) => {
+            target.clone().into()
+        }
         _ => new_target.clone(),
     };
 
