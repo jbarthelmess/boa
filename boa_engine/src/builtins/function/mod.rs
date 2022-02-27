@@ -485,7 +485,7 @@ impl BuiltInFunctionObject {
                 } else {
                     let mut parameters = Vec::with_capacity(args.len());
                     for arg in args {
-                        parameters.push(arg.to_string(context)?.as_std_string_lossy());
+                        parameters.push(arg.to_string(context)?.to_std_string_escaped());
                     }
                     let mut parameters = parameters.join(",");
                     parameters.push(')');
@@ -505,7 +505,7 @@ impl BuiltInFunctionObject {
 
             // TODO: `Parser` should probably take `u32` unicode codepoints
             // to avoid converting the whole string before parsing
-            let body_arg = body_arg.to_string(context)?.as_std_string_lossy();
+            let body_arg = body_arg.to_string(context)?.to_std_string_escaped();
 
             let body = match Parser::new(body_arg.as_bytes()).parse_function_body(
                 context.interner_mut(),

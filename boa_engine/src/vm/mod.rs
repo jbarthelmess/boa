@@ -387,7 +387,7 @@ impl Context {
                 if !rhs.is_object() {
                     return self.throw_type_error(format!(
                         "right-hand side of 'in' should be an object, got {}",
-                        rhs.type_of().as_std_string_lossy()
+                        rhs.type_of().to_std_string_escaped()
                     ));
                 }
                 let key = lhs.to_property_key(self)?;
@@ -480,7 +480,7 @@ impl Context {
                     let key = self
                         .interner()
                         .resolve_expect(binding_locator.name())
-                        .into();
+                        .into_common();
                     self.global_bindings_mut().entry(key).or_insert(
                         PropertyDescriptor::builder()
                             .value(JsValue::Undefined)
@@ -507,6 +507,7 @@ impl Context {
                     let key = self
                         .interner()
                         .resolve_expect(binding_locator.name())
+                        .into_common::<JsString>()
                         .into();
                     crate::object::internal_methods::global::global_set_no_receiver(
                         &key, value, self,
@@ -554,7 +555,7 @@ impl Context {
                         let key: JsString = self
                             .interner()
                             .resolve_expect(binding_locator.name())
-                            .into();
+                            .into_common();
                         match self.global_bindings_mut().get(&key) {
                             Some(desc) => match desc.kind() {
                                 DescriptorKind::Data {
@@ -569,14 +570,14 @@ impl Context {
                                 _ => {
                                     return self.throw_reference_error(format!(
                                         "{} is not defined",
-                                        key.as_std_string_lossy()
+                                        key.to_std_string_escaped()
                                     ))
                                 }
                             },
                             _ => {
                                 return self.throw_reference_error(format!(
                                     "{} is not defined",
-                                    key.as_std_string_lossy()
+                                    key.to_std_string_escaped()
                                 ))
                             }
                         }
@@ -588,12 +589,11 @@ impl Context {
                 ) {
                     value
                 } else {
-                    let name =
-                        JsString::from(self.interner().resolve_expect(binding_locator.name()));
-                    return self.throw_reference_error(format!(
-                        "{} is not initialized",
-                        name.as_std_string_lossy()
-                    ));
+                    let name = self
+                        .interner()
+                        .resolve_expect(binding_locator.name())
+                        .to_string();
+                    return self.throw_reference_error(format!("{name} is not initialized",));
                 };
 
                 self.vm.push(value);
@@ -613,7 +613,7 @@ impl Context {
                         let key: JsString = self
                             .interner()
                             .resolve_expect(binding_locator.name())
-                            .into();
+                            .into_common();
                         match self.global_bindings_mut().get(&key) {
                             Some(desc) => match desc.kind() {
                                 DescriptorKind::Data {
@@ -657,13 +657,13 @@ impl Context {
                         let key: JsString = self
                             .interner()
                             .resolve_expect(binding_locator.name())
-                            .into();
+                            .into_common();
                         let exists = self.global_bindings_mut().contains_key(&key);
 
                         if !exists && self.vm.frame().code.strict {
                             return self.throw_reference_error(format!(
                                 "assignment to undeclared variable {}",
-                                key.as_std_string_lossy()
+                                key.to_std_string_escaped()
                             ));
                         }
 
@@ -677,7 +677,7 @@ impl Context {
                         if !success && self.vm.frame().code.strict {
                             return self.throw_type_error(format!(
                                 "cannot set non-writable property: {}",
-                                key.as_std_string_lossy()
+                                key.to_std_string_escaped()
                             ));
                         }
                     }
@@ -750,7 +750,11 @@ impl Context {
                 };
 
                 let name = self.vm.frame().code.names[index as usize];
-                let name: PropertyKey = self.interner().resolve_expect(name).into();
+                let name: PropertyKey = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>()
+                    .into();
                 let result = object.get(name, self)?;
 
                 self.vm.push(result);
@@ -781,7 +785,11 @@ impl Context {
                 };
 
                 let name = self.vm.frame().code.names[index as usize];
-                let name: PropertyKey = self.interner().resolve_expect(name).into();
+                let name: PropertyKey = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>()
+                    .into();
 
                 object.set(name, value, self.vm.frame().code.strict, self)?;
             }
@@ -795,7 +803,10 @@ impl Context {
                     object.to_object(self)?
                 };
                 let name = self.vm.frame().code.names[index as usize];
-                let name = self.interner().resolve_expect(name);
+                let name = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>();
                 object.__define_own_property__(
                     name.into(),
                     PropertyDescriptor::builder()
@@ -826,7 +837,7 @@ impl Context {
                 let name = self.vm.frame().code.names[index as usize];
                 let name = self.interner().resolve_expect(name);
                 object.__define_own_property__(
-                    name.into(),
+                    name.into_common::<JsString>().into(),
                     PropertyDescriptor::builder()
                         .value(value)
                         .writable(true)
@@ -904,7 +915,11 @@ impl Context {
                 let value = self.vm.pop();
                 let object = object.to_object(self)?;
                 let name = self.vm.frame().code.names[index as usize];
-                let name = self.interner().resolve_expect(name).into();
+                let name = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>()
+                    .into();
                 let set = object
                     .__get_own_property__(&name, self)?
                     .as_ref()
@@ -934,7 +949,11 @@ impl Context {
                     .expect("method must be function object")
                     .set_home_object(object.clone());
                 let name = self.vm.frame().code.names[index as usize];
-                let name = self.interner().resolve_expect(name).into();
+                let name = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>()
+                    .into();
                 let set = object
                     .__get_own_property__(&name, self)?
                     .as_ref()
@@ -1008,7 +1027,11 @@ impl Context {
                 let value = self.vm.pop();
                 let object = object.to_object(self)?;
                 let name = self.vm.frame().code.names[index as usize];
-                let name = self.interner().resolve_expect(name).into();
+                let name = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>()
+                    .into();
                 let get = object
                     .__get_own_property__(&name, self)?
                     .as_ref()
@@ -1038,7 +1061,11 @@ impl Context {
                     .expect("method must be function object")
                     .set_home_object(object.clone());
                 let name = self.vm.frame().code.names[index as usize];
-                let name = self.interner().resolve_expect(name).into();
+                let name = self
+                    .interner()
+                    .resolve_expect(name)
+                    .into_common::<JsString>()
+                    .into();
                 let get = object
                     .__get_own_property__(&name, self)?
                     .as_ref()
@@ -1341,7 +1368,11 @@ impl Context {
             Opcode::DeletePropertyByName => {
                 let index = self.vm.read::<u32>();
                 let key = self.vm.frame().code.names[index as usize];
-                let key = self.interner().resolve_expect(key).into();
+                let key = self
+                    .interner()
+                    .resolve_expect(key)
+                    .into_common::<JsString>()
+                    .into();
                 let object = self.vm.pop();
                 let result = object.to_object(self)?.__delete__(&key, self)?;
                 if !result && self.vm.frame().code.strict {
