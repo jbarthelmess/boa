@@ -483,7 +483,7 @@ impl BuiltInFunctionObject {
             context.construct_type_error("cannot bind `this` without a `[[Call]]` internal method")
         })?;
 
-        let this_arg = args.get_or_undefined(0).clone();
+        let this_arg = args.get_or_undefined(0);
         let bound_args = args.get(1..).unwrap_or(&[]).to_vec();
         let arg_count = bound_args.len() as i64;
 

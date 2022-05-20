@@ -20,9 +20,7 @@ impl JsTypedArray {
     #[inline]
     pub fn from_object(object: JsObject, context: &mut Context) -> JsResult<Self> {
         if object.borrow().is_typed_array() {
-            Ok(Self {
-                inner: object.into(),
-            })
+            Ok(Self { inner: object })
         } else {
             context.throw_type_error("object is not a TypedArray")
         }

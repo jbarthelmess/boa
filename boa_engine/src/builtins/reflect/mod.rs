@@ -365,9 +365,7 @@ impl Reflect {
         } else {
             target.clone().into()
         };
-        Ok(target
-            .__set__(key, value.clone(), receiver, context)?
-            .into())
+        Ok(target.__set__(key, value, receiver, context)?.into())
     }
 
     /// Sets the prototype of an object.

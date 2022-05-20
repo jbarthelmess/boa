@@ -393,7 +393,7 @@ impl Object {
         if !v.is_object() {
             return Ok(JsValue::new(false));
         }
-        let mut v = v.clone();
+        let mut v = v;
         let o = JsValue::new(this.to_object(context)?);
         loop {
             v = Self::get_prototype_of(this, &[v], context)?;

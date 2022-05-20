@@ -142,7 +142,7 @@ impl Set {
         })?;
 
         // 7. Let iteratorRecord be ? GetIterator(iterable).
-        let iterator_record = iterable.clone().get_iterator(context, None, None)?;
+        let iterator_record = iterable.get_iterator(context, None, None)?;
 
         // 8. Repeat,
         //     a. Let next be ? IteratorStep(iteratorRecord).
@@ -202,7 +202,7 @@ impl Set {
                 set.add(if value.as_number().map_or(false, |n| n == -0f64) {
                     JsValue::new(0)
                 } else {
-                    value.clone()
+                    value
                 });
             } else {
                 return context.throw_type_error("'this' is not a Set");
@@ -327,7 +327,7 @@ impl Set {
         let this_arg = if this_arg.is_undefined() {
             context.global_object().clone().into()
         } else {
-            this_arg.clone()
+            this_arg
         };
 
         let mut index = 0;

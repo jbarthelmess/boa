@@ -70,7 +70,7 @@ impl JsValue {
             //    b. If n is NaN, return false.
             //    c. Return the result of the comparison x == n.
             (JsVariant::BigInt(a), JsVariant::String(ref b)) => match JsBigInt::from_string(b) {
-                Some(b) => a == b,
+                Some(b) => *a == b,
                 None => false,
             },
 
@@ -194,7 +194,9 @@ impl JsValue {
     fn same_value_non_numeric(x: &Self, y: &Self) -> bool {
         debug_assert!(x.get_type() == y.get_type());
         match (x.variant(), y.variant()) {
-            (JsVariant::Null, JsVariant::Null) | (JsVariant::Undefined, JsVariant::Undefined) => true,
+            (JsVariant::Null, JsVariant::Null) | (JsVariant::Undefined, JsVariant::Undefined) => {
+                true
+            }
             (JsVariant::String(x), JsVariant::String(y)) => x == y,
             (JsVariant::Boolean(x), JsVariant::Boolean(y)) => x == y,
             (JsVariant::Object(ref x), JsVariant::Object(ref y)) => JsObject::equals(x, y),

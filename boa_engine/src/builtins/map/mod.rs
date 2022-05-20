@@ -238,7 +238,7 @@ impl Map {
                 // i. Set p.[[Value]] to value.
                 // 6. Let p be the Record { [[Key]]: key, [[Value]]: value }.
                 // 7. Append p as the last element of entries.
-                map.insert(key, value.clone());
+                map.insert(key, value);
                 // ii. Return M.
                 // 8. Return M.
                 return Ok(this.clone());

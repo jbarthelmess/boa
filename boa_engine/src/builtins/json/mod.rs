@@ -280,7 +280,7 @@ impl Json {
             }
         }
 
-        let mut space = args.get_or_undefined(2).clone();
+        let mut space = args.get_or_undefined(2);
 
         // 5. If Type(space) is Object, then
         if let Some(space_obj) = space.as_object() {
@@ -332,7 +332,7 @@ impl Json {
 
         // 10. Perform ! CreateDataPropertyOrThrow(wrapper, the empty String, value).
         wrapper
-            .create_data_property_or_throw("", args.get_or_undefined(0).clone(), context)
+            .create_data_property_or_throw("", args.get_or_undefined(0), context)
             .expect("CreateDataPropertyOrThrow should never fail here");
 
         // 11. Let state be the Record { [[ReplacerFunction]]: ReplacerFunction, [[Stack]]: stack, [[Indent]]: indent, [[Gap]]: gap, [[PropertyList]]: PropertyList }.

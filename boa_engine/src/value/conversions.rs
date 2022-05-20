@@ -1,4 +1,6 @@
-use crate::JsString;
+use boa_profiler::Profiler;
+
+use crate::{object::JsObject, JsBigInt, JsString, JsSymbol};
 
 use super::{Display, JsValue};
 
@@ -9,86 +11,29 @@ impl From<&Self> for JsValue {
     }
 }
 
-impl From<u8> for JsValue {
+impl<T> From<T> for JsValue
+where
+    T: Into<JsString>,
+{
     #[inline]
-    fn from(value: u8) -> Self {
-        Self::from(value as i32)
+    fn from(value: T) -> Self {
+        let _timer = Profiler::global().start_event("From<String>", "value");
+
+        Self::string(value.into())
     }
 }
 
-impl From<i8> for JsValue {
+impl From<char> for JsValue {
     #[inline]
-    fn from(value: i8) -> Self {
-        Self::from(value as i32)
+    fn from(value: char) -> Self {
+        Self::new(value.to_string())
     }
 }
 
-impl From<u16> for JsValue {
+impl From<JsSymbol> for JsValue {
     #[inline]
-    fn from(value: u16) -> Self {
-        Self::from(value as i32)
-    }
-}
-
-impl From<i16> for JsValue {
-    #[inline]
-    fn from(value: i16) -> Self {
-        Self::from(value as i32)
-    }
-}
-
-impl From<u32> for JsValue {
-    #[inline]
-    fn from(value: u32) -> Self {
-        if let Ok(integer) = i32::try_from(value) {
-            Self::from(integer)
-        } else {
-            Self::from(value as f64)
-        }
-    }
-}
-
-impl From<usize> for JsValue {
-    #[inline]
-    fn from(value: usize) -> Self {
-        if let Ok(value) = i32::try_from(value) {
-            Self::from(value)
-        } else {
-            Self::from(value as f64)
-        }
-    }
-}
-
-impl From<isize> for JsValue {
-    #[inline]
-    fn from(value: isize) -> Self {
-        if let Ok(value) = i32::try_from(value) {
-            Self::from(value)
-        } else {
-            Self::from(value as f64)
-        }
-    }
-}
-
-impl From<u64> for JsValue {
-    #[inline]
-    fn from(value: u64) -> Self {
-        if let Ok(value) = i32::try_from(value) {
-            Self::from(value)
-        } else {
-            Self::from(value as f64)
-        }
-    }
-}
-
-impl From<i64> for JsValue {
-    #[inline]
-    fn from(value: i64) -> Self {
-        if let Ok(value) = i32::try_from(value) {
-            Self::from(value)
-        } else {
-            Self::from(value as f64)
-        }
+    fn from(value: JsSymbol) -> Self {
+        Self::symbol(value)
     }
 }
 
@@ -99,43 +44,128 @@ impl From<f32> for JsValue {
         // if value as i32 as f64 == value {
         //     Self::Integer(value as i32)
         // } else {
-        Self::from(value as f64)
+        Self::rational(value.into())
         // }
     }
 }
 
-impl From<char> for JsValue {
+impl From<f64> for JsValue {
+    #[allow(clippy::float_cmp)]
     #[inline]
-    fn from(value: char) -> Self {
-        Self::from(value.to_string())
+    fn from(value: f64) -> Self {
+        // if value as i32 as f64 == value {
+        //     Self::Integer(value as i32)
+        // } else {
+        Self::rational(value)
+        // }
     }
 }
 
-impl From<&str> for JsValue {
+impl From<u8> for JsValue {
     #[inline]
-    fn from(string: &str) -> Self {
-        Self::from(JsString::new(string))
+    fn from(value: u8) -> Self {
+        Self::integer(value.into())
     }
 }
 
-impl From<Box<str>> for JsValue {
+impl From<i8> for JsValue {
     #[inline]
-    fn from(string: Box<str>) -> Self {
-        Self::from(JsString::new(string))
+    fn from(value: i8) -> Self {
+        Self::integer(value.into())
     }
 }
 
-impl From<&String> for JsValue {
+impl From<u16> for JsValue {
     #[inline]
-    fn from(string: &String) -> Self {
-        Self::from(JsString::new(string.as_str()))
+    fn from(value: u16) -> Self {
+        Self::integer(value.into())
     }
 }
 
-impl From<String> for JsValue {
+impl From<i16> for JsValue {
     #[inline]
-    fn from(string: String) -> Self {
-        Self::from(JsString::new(string))
+    fn from(value: i16) -> Self {
+        Self::integer(value.into())
+    }
+}
+
+impl From<u32> for JsValue {
+    #[inline]
+    fn from(value: u32) -> Self {
+        if let Ok(integer) = i32::try_from(value) {
+            Self::integer(integer)
+        } else {
+            Self::rational(value.into())
+        }
+    }
+}
+
+impl From<i32> for JsValue {
+    #[inline]
+    fn from(value: i32) -> Self {
+        Self::integer(value)
+    }
+}
+
+impl From<JsBigInt> for JsValue {
+    #[inline]
+    fn from(value: JsBigInt) -> Self {
+        Self::bigint(value)
+    }
+}
+
+impl From<usize> for JsValue {
+    #[inline]
+    fn from(value: usize) -> Self {
+        if let Ok(value) = i32::try_from(value) {
+            Self::integer(value)
+        } else {
+            Self::rational(value as f64)
+        }
+    }
+}
+
+impl From<u64> for JsValue {
+    #[inline]
+    fn from(value: u64) -> Self {
+        if let Ok(value) = i32::try_from(value) {
+            Self::integer(value)
+        } else {
+            Self::rational(value as f64)
+        }
+    }
+}
+
+impl From<i64> for JsValue {
+    #[inline]
+    fn from(value: i64) -> Self {
+        if let Ok(value) = i32::try_from(value) {
+            Self::integer(value)
+        } else {
+            Self::rational(value as f64)
+        }
+    }
+}
+
+impl From<bool> for JsValue {
+    #[inline]
+    fn from(value: bool) -> Self {
+        Self::boolean(value)
+    }
+}
+
+impl From<JsObject> for JsValue {
+    #[inline]
+    fn from(object: JsObject) -> Self {
+        let _timer = Profiler::global().start_event("From<JsObject>", "value");
+        Self::object(object)
+    }
+}
+
+impl From<()> for JsValue {
+    #[inline]
+    fn from(_: ()) -> Self {
+        Self::null()
     }
 }
 

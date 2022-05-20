@@ -1521,7 +1521,7 @@ impl String {
         let fill_string = args.get_or_undefined(1);
 
         // 2. Return ? StringPad(O, maxLength, fillString, start).
-        Self::string_pad(this, &max_length,& fill_string, Placement::Start, context)
+        Self::string_pad(this, &max_length, &fill_string, Placement::Start, context)
     }
 
     /// String.prototype.trim()

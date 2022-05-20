@@ -100,9 +100,9 @@ impl DataView {
     ) -> JsResult<JsValue> {
         let byte_length = args.get_or_undefined(2);
 
-        let buffer_obj = args
-            .get_or_undefined(0);
-        let buffer_obj = buffer_obj.as_object()
+        let buffer_obj = args.get_or_undefined(0);
+        let buffer_obj = buffer_obj
+            .as_object()
             .ok_or_else(|| context.construct_type_error("buffer must be an ArrayBuffer"))?;
 
         // 1. If NewTarget is undefined, throw a TypeError exception.
