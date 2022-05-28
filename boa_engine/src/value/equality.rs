@@ -16,10 +16,10 @@ impl JsValue {
             // 2. If Type(x) is Number or BigInt, then
             //    a. Return ! Type(x)::equal(x, y).
             (JsVariant::BigInt(ref x), JsVariant::BigInt(ref y)) => JsBigInt::equal(x, y),
-            (JsVariant::Rational(x), JsVariant::Rational(y)) => Number::equal(x, y),
-            (JsVariant::Rational(x), JsVariant::Integer(y)) => Number::equal(x, f64::from(y)),
-            (JsVariant::Integer(x), JsVariant::Rational(y)) => Number::equal(f64::from(x), y),
-            (JsVariant::Integer(x), JsVariant::Integer(y)) => x == y,
+            (JsVariant::Float64(x), JsVariant::Float64(y)) => Number::equal(x, y),
+            (JsVariant::Float64(x), JsVariant::Integer32(y)) => Number::equal(x, f64::from(y)),
+            (JsVariant::Integer32(x), JsVariant::Float64(y)) => Number::equal(f64::from(x), y),
+            (JsVariant::Integer32(x), JsVariant::Integer32(y)) => x == y,
 
             //Null has to be handled specially because "typeof null" returns object and if we managed
             //this without a special case we would compare self and other as if they were actually
@@ -56,10 +56,10 @@ impl JsValue {
             //
             // https://github.com/rust-lang/rust/issues/54883
             (
-                JsVariant::Integer(_) | JsVariant::Rational(_),
+                JsVariant::Integer32(_) | JsVariant::Float64(_),
                 JsVariant::String(_) | JsVariant::Boolean(_),
             )
-            | (JsVariant::String(_), JsVariant::Integer(_) | JsVariant::Rational(_)) => {
+            | (JsVariant::String(_), JsVariant::Integer32(_) | JsVariant::Float64(_)) => {
                 let x = self.to_number(context)?;
                 let y = other.to_number(context)?;
                 Number::equal(x, y)
@@ -91,8 +91,8 @@ impl JsValue {
             (
                 JsVariant::Object(_),
                 JsVariant::String(_)
-                | JsVariant::Rational(_)
-                | JsVariant::Integer(_)
+                | JsVariant::Float64(_)
+                | JsVariant::Integer32(_)
                 | JsVariant::BigInt(_)
                 | JsVariant::Symbol(_),
             ) => {
@@ -106,8 +106,8 @@ impl JsValue {
             // of the comparison ? ToPrimitive(x) == y.
             (
                 JsVariant::String(_)
-                | JsVariant::Rational(_)
-                | JsVariant::Integer(_)
+                | JsVariant::Float64(_)
+                | JsVariant::Integer32(_)
                 | JsVariant::BigInt(_)
                 | JsVariant::Symbol(_),
                 JsVariant::Object(_),
@@ -121,10 +121,10 @@ impl JsValue {
             // 12. If Type(x) is BigInt and Type(y) is Number, or if Type(x) is Number and Type(y) is BigInt, then
             //    a. If x or y are any of NaN, +∞, or -∞, return false.
             //    b. If the mathematical value of x is equal to the mathematical value of y, return true; otherwise return false.
-            (JsVariant::BigInt(a), JsVariant::Rational(b)) => *a == b,
-            (JsVariant::Rational(a), JsVariant::BigInt(b)) => a == *b,
-            (JsVariant::BigInt(a), JsVariant::Integer(b)) => *a == b,
-            (JsVariant::Integer(a), JsVariant::BigInt(b)) => a == *b,
+            (JsVariant::BigInt(a), JsVariant::Float64(b)) => *a == b,
+            (JsVariant::Float64(a), JsVariant::BigInt(b)) => a == *b,
+            (JsVariant::BigInt(a), JsVariant::Integer32(b)) => *a == b,
+            (JsVariant::Integer32(a), JsVariant::BigInt(b)) => a == *b,
 
             // 13. Return false.
             _ => false,
@@ -148,10 +148,10 @@ impl JsValue {
             // 2. If Type(x) is Number or BigInt, then
             //    a. Return ! Type(x)::SameValue(x, y).
             (JsVariant::BigInt(ref x), JsVariant::BigInt(ref y)) => JsBigInt::same_value(x, y),
-            (JsVariant::Rational(x), JsVariant::Rational(y)) => Number::same_value(x, y),
-            (JsVariant::Rational(x), JsVariant::Integer(y)) => Number::same_value(x, f64::from(y)),
-            (JsVariant::Integer(x), JsVariant::Rational(y)) => Number::same_value(f64::from(x), y),
-            (JsVariant::Integer(x), JsVariant::Integer(y)) => x == y,
+            (JsVariant::Float64(x), JsVariant::Float64(y)) => Number::same_value(x, y),
+            (JsVariant::Float64(x), JsVariant::Integer32(y)) => Number::same_value(x, f64::from(y)),
+            (JsVariant::Integer32(x), JsVariant::Float64(y)) => Number::same_value(f64::from(x), y),
+            (JsVariant::Integer32(x), JsVariant::Integer32(y)) => x == y,
 
             // 3. Return ! SameValueNonNumeric(x, y).
             (_, _) => Self::same_value_non_numeric(x, y),
@@ -177,14 +177,14 @@ impl JsValue {
             //    a. Return ! Type(x)::SameValueZero(x, y).
             (JsVariant::BigInt(ref x), JsVariant::BigInt(ref y)) => JsBigInt::same_value_zero(x, y),
 
-            (JsVariant::Rational(x), JsVariant::Rational(y)) => Number::same_value_zero(x, y),
-            (JsVariant::Rational(x), JsVariant::Integer(y)) => {
+            (JsVariant::Float64(x), JsVariant::Float64(y)) => Number::same_value_zero(x, y),
+            (JsVariant::Float64(x), JsVariant::Integer32(y)) => {
                 Number::same_value_zero(x, f64::from(y))
             }
-            (JsVariant::Integer(x), JsVariant::Rational(y)) => {
+            (JsVariant::Integer32(x), JsVariant::Float64(y)) => {
                 Number::same_value_zero(f64::from(x), y)
             }
-            (JsVariant::Integer(x), JsVariant::Integer(y)) => x == y,
+            (JsVariant::Integer32(x), JsVariant::Integer32(y)) => x == y,
 
             // 3. Return ! SameValueNonNumeric(x, y).
             (_, _) => Self::same_value_non_numeric(x, y),

@@ -5,6 +5,8 @@
 //!  - **serde** - Enables serialization and deserialization of the AST (Abstract Syntax Tree).
 //!  - **console** - Enables `boa`'s [WHATWG `console`][whatwg] object implementation.
 //!  - **profiler** - Enables profiling with measureme (this is mostly internal).
+//!  - **nan_boxing** - Enables `boa`'s nan-boxed [`JsValue`] implementation
+//! (Only available on x86_64 platforms, does nothing on incompatible platforms).
 //!  - **intl** - Enables `boa`'s [ECMA-402 Internationalization API][ecma-402] (`Intl` object)
 //!
 //! [whatwg]: https://console.spec.whatwg.org
@@ -72,6 +74,8 @@
     rustdoc::missing_doc_code_examples
 )]
 
+pub mod value; // In the top to give priority to `JsValue` docs
+
 pub mod bigint;
 pub mod builtins;
 pub mod bytecompiler;
@@ -84,7 +88,6 @@ pub mod realm;
 pub mod string;
 pub mod symbol;
 pub mod syntax;
-pub mod value;
 pub mod vm;
 
 #[cfg(test)]

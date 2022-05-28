@@ -22,7 +22,7 @@ impl JsValue {
     /// Check [`JsValue::type_of`] if you need to call the `typeof` operator.
     pub fn get_type(&self) -> Type {
         match self.variant() {
-            JsVariant::Rational(_) | JsVariant::Integer(_) => Type::Number,
+            JsVariant::Float64(_) | JsVariant::Integer32(_) => Type::Number,
             JsVariant::String(_) => Type::String,
             JsVariant::Boolean(_) => Type::Boolean,
             JsVariant::Symbol(_) => Type::Symbol,

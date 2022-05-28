@@ -994,8 +994,8 @@ impl Number {
     ) -> JsResult<JsValue> {
         Ok(JsValue::new(if let Some(val) = args.get(0) {
             match val.variant() {
-                JsVariant::Rational(number) => number.is_finite(),
-                JsVariant::Integer(_) => true,
+                JsVariant::Float64(number) => number.is_finite(),
+                JsVariant::Integer32(_) => true,
                 _ => false,
             }
         } else {
@@ -1066,8 +1066,8 @@ impl Number {
         _ctx: &mut Context,
     ) -> JsResult<JsValue> {
         Ok(JsValue::new(match args.get(0).map(JsValue::variant) {
-            Some(JsVariant::Integer(_)) => true,
-            Some(JsVariant::Rational(number)) if Self::is_float_integer(number) => {
+            Some(JsVariant::Integer32(_)) => true,
+            Some(JsVariant::Float64(number)) if Self::is_float_integer(number) => {
                 number.abs() <= Self::MAX_SAFE_INTEGER
             }
             _ => false,
@@ -1083,8 +1083,8 @@ impl Number {
     #[inline]
     pub(crate) fn is_integer(val: &JsValue) -> bool {
         match val.variant() {
-            JsVariant::Integer(_) => true,
-            JsVariant::Rational(number) => Self::is_float_integer(number),
+            JsVariant::Integer32(_) => true,
+            JsVariant::Float64(number) => Self::is_float_integer(number),
             _ => false,
         }
     }

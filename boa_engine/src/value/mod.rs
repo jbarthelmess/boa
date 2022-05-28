@@ -1,7 +1,27 @@
 #![warn(unsafe_op_in_unsafe_fn)]
-//! This module implements the JavaScript Value.
+//! This module implements the JavaScript [`JsValue`] type.
 //!
-//! Javascript values, utility methods and conversion between Javascript values and Rust values.
+//! [`JsValue`] implements several utility methods and conversions between Javascript
+//! values and Rust values.
+//!
+//! # Notes
+//!
+//! We recommend using [`JsValue::from`], [`JsValue::new`] or the [`Into::into`]
+//! trait if you need to convert from float types ([`f64`], [`f32`]) to [`JsValue`],
+//! since there are some checks implemented that convert float values to signed
+//! integer values when there's no loss of precision involved.
+//!
+//! Alternatively, you can use the [`JsValue::float64`] method if you do need a pure
+//! [`f64`] value. The constructor skips all conversions from [`f64`]s to
+//! [`i32`]s, even if the value can be represented by an [`i32`] without loss of
+//! precision.
+//!
+//! # Alternative implementations
+//!
+//! `boa` right now implements two versions of [`JsValue`]:
+//! - The default implementation using a simple `enum`.
+//! - A NaN-boxed implementation for x86-64 platforms that can be enabled using the `nan_boxing` feature.
+//! The feature flag is ignored on incompatible platforms.
 
 #[cfg(test)]
 mod tests;
@@ -28,6 +48,11 @@ use std::{
     str::FromStr,
 };
 
+mod sys;
+
+#[doc(inline)]
+pub use sys::{JsValue, JsVariant, Ref};
+
 mod conversions;
 pub(crate) mod display;
 mod equality;
@@ -35,7 +60,6 @@ mod hash;
 mod integer;
 mod operations;
 mod serde_json;
-pub mod sys;
 mod r#type;
 
 pub use conversions::*;
@@ -46,7 +70,6 @@ pub use integer::IntegerOrInfinity;
 pub use operations::*;
 pub use r#type::Type;
 pub(crate) use sys::PointerType;
-pub use sys::{JsValue, JsVariant, Ref};
 
 static TWO_E_64: Lazy<BigInt> = Lazy::new(|| {
     const TWO_E_64: u128 = 2u128.pow(64);
@@ -117,34 +140,32 @@ impl JsValue {
         self.as_object().filter(|obj| obj.is_constructor())
     }
 
-    /// Returns true if the value is integer.
+    /// Returns true if the value is an integer, even if it's represented by an [`f64`].
     #[inline]
     #[allow(clippy::float_cmp)]
     pub fn is_integer(&self) -> bool {
-        // If it can fit in a i32 and the trucated version is
-        // equal to the original then it is an integer.
-        let is_racional_intiger = |n: f64| n == f64::from(n as i32);
-
-        if self.is_i32() {
-            true
-        } else if let Some(num) = self.as_rational() {
-            is_racional_intiger(num)
-        } else {
-            false
+        if self.is_integer32() {
+            return true;
         }
+
+        self.as_float64()
+            // If it can fit in a i32 and the trucated version is
+            // equal to the original then it is an integer.
+            .map(|num| num == f64::from(num as i32))
+            .unwrap_or_default()
     }
 
     /// Returns true if the value is a number.
     #[inline]
     pub fn is_number(&self) -> bool {
-        self.is_i32() || self.is_rational()
+        self.is_integer32() || self.is_float64()
     }
 
     #[inline]
     pub fn as_number(&self) -> Option<f64> {
         match self.variant() {
-            JsVariant::Integer(integer) => Some(integer.into()),
-            JsVariant::Rational(rational) => Some(rational),
+            JsVariant::Integer32(integer) => Some(integer.into()),
+            JsVariant::Float64(rational) => Some(rational),
             _ => None,
         }
     }
@@ -159,8 +180,8 @@ impl JsValue {
         match self.variant() {
             JsVariant::Symbol(_) | JsVariant::Object(_) => true,
             JsVariant::String(s) if !s.is_empty() => true,
-            JsVariant::Rational(n) if n != 0.0 && !n.is_nan() => true,
-            JsVariant::Integer(n) if n != 0 => true,
+            JsVariant::Float64(n) if n != 0.0 && !n.is_nan() => true,
+            JsVariant::Integer32(n) if n != 0 => true,
             JsVariant::BigInt(n) if !n.is_zero() => true,
             JsVariant::Boolean(v) => v,
             _ => false,
@@ -278,7 +299,7 @@ impl JsValue {
             }
             JsVariant::Boolean(true) => Ok(JsBigInt::one()),
             JsVariant::Boolean(false) => Ok(JsBigInt::zero()),
-            JsVariant::Integer(_) | JsVariant::Rational(_) => {
+            JsVariant::Integer32(_) | JsVariant::Float64(_) => {
                 context.throw_type_error("cannot convert Number to a BigInt")
             }
             JsVariant::BigInt(b) => Ok(b.clone()),
@@ -320,8 +341,8 @@ impl JsValue {
             JsVariant::Null => Ok("null".into()),
             JsVariant::Undefined => Ok("undefined".into()),
             JsVariant::Boolean(boolean) => Ok(boolean.to_string().into()),
-            JsVariant::Rational(rational) => Ok(Number::to_native_string(rational).into()),
-            JsVariant::Integer(integer) => Ok(integer.to_string().into()),
+            JsVariant::Float64(rational) => Ok(Number::to_native_string(rational).into()),
+            JsVariant::Integer32(integer) => Ok(integer.to_string().into()),
             JsVariant::String(string) => Ok(string.clone()),
             JsVariant::Symbol(_) => context.throw_type_error("can't convert symbol to string"),
             JsVariant::BigInt(bigint) => Ok(bigint.to_string().into()),
@@ -349,14 +370,14 @@ impl JsValue {
                     ObjectData::boolean(boolean),
                 ))
             }
-            JsVariant::Integer(integer) => {
+            JsVariant::Integer32(integer) => {
                 let prototype = context.intrinsics().constructors().number().prototype();
                 Ok(JsObject::from_proto_and_data(
                     prototype,
                     ObjectData::number(f64::from(integer)),
                 ))
             }
-            JsVariant::Rational(rational) => {
+            JsVariant::Float64(rational) => {
                 let prototype = context.intrinsics().constructors().number().prototype();
                 Ok(JsObject::from_proto_and_data(
                     prototype,
@@ -439,7 +460,7 @@ impl JsValue {
     /// See: <https://tc39.es/ecma262/#sec-touint32>
     pub fn to_u32(&self, context: &mut Context) -> JsResult<u32> {
         // This is the fast path, if the value is Integer we can just return it.
-        if let Some(number) = self.as_i32() {
+        if let Some(number) = self.as_integer32() {
             return Ok(number as u32);
         }
         let number = self.to_number(context)?;
@@ -452,7 +473,7 @@ impl JsValue {
     /// See: <https://tc39.es/ecma262/#sec-toint32>
     pub fn to_i32(&self, context: &mut Context) -> JsResult<i32> {
         // This is the fast path, if the value is Integer we can just return it.
-        if let Some(number) = self.as_i32() {
+        if let Some(number) = self.as_integer32() {
             return Ok(number);
         }
         let number = self.to_number(context)?;
@@ -738,8 +759,8 @@ impl JsValue {
             JsVariant::Undefined => Ok(f64::NAN),
             JsVariant::Boolean(b) => Ok(if b { 1.0 } else { 0.0 }),
             JsVariant::String(string) => Ok(string.string_to_number()),
-            JsVariant::Rational(number) => Ok(number),
-            JsVariant::Integer(integer) => Ok(f64::from(integer)),
+            JsVariant::Float64(number) => Ok(number),
+            JsVariant::Integer32(integer) => Ok(f64::from(integer)),
             JsVariant::Symbol(_) => context.throw_type_error("argument must not be a symbol"),
             JsVariant::BigInt(_) => context.throw_type_error("argument must not be a bigint"),
             JsVariant::Object(_) => {
@@ -803,7 +824,7 @@ impl JsValue {
     /// [spec]: https://tc39.es/ecma262/#sec-typeof-operator
     pub fn type_of(&self) -> JsString {
         match self.variant() {
-            JsVariant::Rational(_) | JsVariant::Integer(_) => "number",
+            JsVariant::Float64(_) | JsVariant::Integer32(_) => "number",
             JsVariant::String(_) => "string",
             JsVariant::Boolean(_) => "boolean",
             JsVariant::Symbol(_) => "symbol",

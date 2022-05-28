@@ -23,7 +23,7 @@ intl = [
     "dep:icu_testdata",
     "dep:sys-locale"
 ]
-nan_boxing = []
+nan_boxing = ["dep:sptr", "dep:num_enum"]
 
 # Enable Boa's WHATWG console object implementation.
 console = []
@@ -51,9 +51,9 @@ unicode-normalization = "0.1.19"
 dyn-clone = "1.0.5"
 once_cell = "1.12.0"
 tap = "1.0.1"
-sptr = "0.3.1"
 cfg-if = "1.0.0"
-num_enum = "0.5.7"
+sptr = { version = "0.3.1", optional = true }
+num_enum = { version = "0.5.7", optional = true }
 icu_locale_canonicalizer = { version = "0.6.0", features = ["serde"], optional = true }
 icu_locid = { version = "0.6.0", features = ["serde"],  optional = true }
 icu_datetime = { version = "0.6.0", features = ["serde"], optional = true }

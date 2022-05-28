@@ -44,7 +44,7 @@ impl From<f32> for JsValue {
         // if value as i32 as f64 == value {
         //     Self::Integer(value as i32)
         // } else {
-        Self::rational(value.into())
+        Self::float64(value.into())
         // }
     }
 }
@@ -56,7 +56,7 @@ impl From<f64> for JsValue {
         // if value as i32 as f64 == value {
         //     Self::Integer(value as i32)
         // } else {
-        Self::rational(value)
+        Self::float64(value)
         // }
     }
 }
@@ -64,28 +64,28 @@ impl From<f64> for JsValue {
 impl From<u8> for JsValue {
     #[inline]
     fn from(value: u8) -> Self {
-        Self::integer(value.into())
+        Self::integer32(value.into())
     }
 }
 
 impl From<i8> for JsValue {
     #[inline]
     fn from(value: i8) -> Self {
-        Self::integer(value.into())
+        Self::integer32(value.into())
     }
 }
 
 impl From<u16> for JsValue {
     #[inline]
     fn from(value: u16) -> Self {
-        Self::integer(value.into())
+        Self::integer32(value.into())
     }
 }
 
 impl From<i16> for JsValue {
     #[inline]
     fn from(value: i16) -> Self {
-        Self::integer(value.into())
+        Self::integer32(value.into())
     }
 }
 
@@ -93,9 +93,9 @@ impl From<u32> for JsValue {
     #[inline]
     fn from(value: u32) -> Self {
         if let Ok(integer) = i32::try_from(value) {
-            Self::integer(integer)
+            Self::integer32(integer)
         } else {
-            Self::rational(value.into())
+            Self::float64(value.into())
         }
     }
 }
@@ -103,7 +103,7 @@ impl From<u32> for JsValue {
 impl From<i32> for JsValue {
     #[inline]
     fn from(value: i32) -> Self {
-        Self::integer(value)
+        Self::integer32(value)
     }
 }
 
@@ -118,9 +118,9 @@ impl From<usize> for JsValue {
     #[inline]
     fn from(value: usize) -> Self {
         if let Ok(value) = i32::try_from(value) {
-            Self::integer(value)
+            Self::integer32(value)
         } else {
-            Self::rational(value as f64)
+            Self::float64(value as f64)
         }
     }
 }
@@ -129,9 +129,9 @@ impl From<u64> for JsValue {
     #[inline]
     fn from(value: u64) -> Self {
         if let Ok(value) = i32::try_from(value) {
-            Self::integer(value)
+            Self::integer32(value)
         } else {
-            Self::rational(value as f64)
+            Self::float64(value as f64)
         }
     }
 }
@@ -140,9 +140,9 @@ impl From<i64> for JsValue {
     #[inline]
     fn from(value: i64) -> Self {
         if let Ok(value) = i32::try_from(value) {
-            Self::integer(value)
+            Self::integer32(value)
         } else {
-            Self::rational(value as f64)
+            Self::float64(value as f64)
         }
     }
 }

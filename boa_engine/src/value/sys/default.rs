@@ -4,216 +4,244 @@ use super::JsVariant;
 
 use crate::{object::JsObject, JsBigInt, JsString, JsSymbol};
 
-/// A Javascript value
 #[derive(Trace, Finalize, Debug, Clone)]
-pub enum JsValue {
-    /// `null` - A null value, for when a value doesn't exist.
+enum Value {
     Null,
-    /// `undefined` - An undefined value, for when a field or index doesn't exist.
     Undefined,
-    /// `boolean` - A `true` / `false` value, for if a certain criteria is met.
     Boolean(bool),
-    /// `String` - A UTF-8 string, such as `"Hello, world"`.
+    Integer32(i32),
+    Float64(f64),
     String(JsString),
-    /// `Number` - A 64-bit floating point number, such as `3.1415`
-    Rational(f64),
-    /// `Number` - A 32-bit integer, such as `42`.
-    Integer(i32),
-    /// `BigInt` - holds any arbitrary large signed integer.
     BigInt(JsBigInt),
-    /// `Object` - An object, such as `Math`, represented by a binary tree of string keys to Javascript values.
-    Object(JsObject),
-    /// `Symbol` - A Symbol Primitive type.
     Symbol(JsSymbol),
+    Object(JsObject),
 }
 
-impl JsValue {
-    /// Creates a new `undefined` value.
-    #[inline]
-    pub const fn undefined() -> Self {
-        Self::Undefined
-    }
+/// A Javascript value
+///
+/// Check the [`value`][`super::super`] module for more information.
+#[derive(Trace, Finalize, Debug, Clone)]
+pub struct JsValue(Value);
 
-    /// Creates a new `null` value.
+impl JsValue {
+    /// `null` - A null value, for when a value doesn't exist.
     #[inline]
     pub const fn null() -> Self {
-        Self::Null
+        Self(Value::Null)
     }
 
-    /// Creates a new number with `NaN` value.
+    /// `undefined` - An undefined value, for when a field or index doesn't exist
+    #[inline]
+    pub const fn undefined() -> Self {
+        Self(Value::Undefined)
+    }
+
+    /// `boolean` - A `true` / `false` value.
+    #[inline]
+    pub const fn boolean(boolean: bool) -> Self {
+        Self(Value::Boolean(boolean))
+    }
+
+    /// `integer32` - A 32-bit integer value, such as `42`.
+    #[inline]
+    pub const fn integer32(integer: i32) -> Self {
+        Self(Value::Integer32(integer))
+    }
+
+    /// `float64` - A 64-bit floating point number value, such as `3.1415`
+    #[inline]
+    pub const fn float64(float64: f64) -> Self {
+        Self(Value::Float64(float64))
+    }
+
+    /// Creates a new [`f64`] value equal to `NaN`.
     #[inline]
     pub const fn nan() -> Self {
-        Self::Rational(f64::NAN)
+        Self(Value::Float64(f64::NAN))
     }
 
-    #[inline]
-    pub fn rational(rational: f64) -> Self {
-        Self::Rational(rational)
-    }
-
-    #[inline]
-    pub fn integer(integer: i32) -> Self {
-        Self::Integer(integer)
-    }
-
-    #[inline]
-    pub fn boolean(boolean: bool) -> Self {
-        Self::Boolean(boolean)
-    }
-
-    #[inline]
-    pub fn object(object: JsObject) -> Self {
-        Self::Object(object)
-    }
-
+    /// `String` - A [`JsString`] value, such as `"Hello, world"`.
     #[inline]
     pub fn string(string: JsString) -> Self {
-        Self::String(string)
+        Self(Value::String(string))
     }
 
-    #[inline]
-    pub fn symbol(symbol: JsSymbol) -> Self {
-        Self::Symbol(symbol)
-    }
-
+    /// `BigInt` - A [`JsBigInt`] value, an arbitrarily large signed integer.
     #[inline]
     pub fn bigint(bigint: JsBigInt) -> Self {
-        Self::BigInt(bigint)
+        Self(Value::BigInt(bigint))
     }
 
+    /// `Symbol` - A [`JsSymbol`] value.
     #[inline]
-    pub fn as_rational(&self) -> Option<f64> {
-        match *self {
-            Self::Rational(rational) => Some(rational),
-            _ => None,
-        }
+    pub fn symbol(symbol: JsSymbol) -> Self {
+        Self(Value::Symbol(symbol))
     }
 
+    /// `Object` - A [`JsObject`], such as `Math`, represented by a binary tree of string keys to Javascript values.
     #[inline]
-    pub fn as_i32(&self) -> Option<i32> {
-        match *self {
-            Self::Integer(integer) => Some(integer),
-            _ => None,
-        }
+    pub fn object(object: JsObject) -> Self {
+        Self(Value::Object(object))
     }
 
+    /// Returns the internal [`bool`] if the value is a boolean, or
+    /// [`None`] otherwise.
     #[inline]
     pub fn as_boolean(&self) -> Option<bool> {
-        match self {
-            Self::Boolean(boolean) => Some(*boolean),
+        match self.0 {
+            Value::Boolean(boolean) => Some(boolean),
             _ => None,
         }
     }
 
+    /// Returns the internal [`i32`] if the value is a 32-bit signed integer number, or
+    /// [`None`] otherwise.
     #[inline]
-    pub fn as_object(&self) -> Option<Ref<'_, JsObject>> {
-        match self {
-            Self::Object(inner) => Some(Ref { inner }),
+    pub fn as_integer32(&self) -> Option<i32> {
+        match self.0 {
+            Value::Integer32(integer) => Some(integer),
             _ => None,
         }
     }
 
-    /// Returns the string if the values is a string, otherwise `None`.
+    /// Returns the internal [`f64`] if the value is a 64-bit floating-point number, or
+    /// [`None`] otherwise.
+    #[inline]
+    pub fn as_float64(&self) -> Option<f64> {
+        match self.0 {
+            Value::Float64(rational) => Some(rational),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the internal [`JsString`] if the value is a string, or
+    /// [`None`] otherwise.
     #[inline]
     pub fn as_string(&self) -> Option<Ref<'_, JsString>> {
-        match self {
-            Self::String(inner) => Some(Ref { inner }),
+        match self.0 {
+            Value::String(ref inner) => Some(Ref { inner }),
             _ => None,
         }
     }
 
-    pub fn as_symbol(&self) -> Option<Ref<'_, JsSymbol>> {
-        match self {
-            Self::Symbol(inner) => Some(Ref { inner }),
-            _ => None,
-        }
-    }
-
-    /// Returns an optional reference to a `BigInt` if the value is a `BigInt` primitive.
+    /// Returns a reference to the internal [`JsBigInt`] if the value is a big int, or
+    /// [`None`] otherwise.
     #[inline]
     pub fn as_bigint(&self) -> Option<Ref<'_, JsBigInt>> {
-        match self {
-            Self::BigInt(inner) => Some(Ref { inner }),
+        match self.0 {
+            Value::BigInt(ref inner) => Some(Ref { inner }),
             _ => None,
         }
     }
 
-    /// Returns true if the value is undefined.
+    /// Returns a reference to the internal [`JsSymbol`] if the value is a symbol, or
+    /// [`None`] otherwise.
     #[inline]
-    pub fn is_undefined(&self) -> bool {
-        matches!(self, Self::Undefined)
+    pub fn as_symbol(&self) -> Option<Ref<'_, JsSymbol>> {
+        match self.0 {
+            Value::Symbol(ref inner) => Some(Ref { inner }),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the internal [`JsObject`] if the value is an object, or
+    /// [`None`] otherwise.
+    #[inline]
+    pub fn as_object(&self) -> Option<Ref<'_, JsObject>> {
+        match self.0 {
+            Value::Object(ref inner) => Some(Ref { inner }),
+            _ => None,
+        }
     }
 
     /// Returns true if the value is null.
     #[inline]
     pub fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
+        matches!(self.0, Value::Null)
     }
 
-    /// Returns true if the value is a 64-bit floating-point number.
+    /// Returns true if the value is undefined.
     #[inline]
-    pub fn is_rational(&self) -> bool {
-        matches!(self, Self::Rational(_))
-    }
-
-    /// Returns true if the value is any of the representations of a 64-bit floating-point `NaN`.
-    #[inline]
-    pub fn is_nan(&self) -> bool {
-        matches!(self, Self::Rational(r) if r.is_nan())
-    }
-
-    /// Returns true if the value is a 32-bit signed integer number.
-    #[inline]
-    pub fn is_i32(&self) -> bool {
-        matches!(self, Self::Integer(_))
+    pub fn is_undefined(&self) -> bool {
+        matches!(self.0, Value::Undefined)
     }
 
     /// Returns true if the value is a boolean.
     #[inline]
     pub fn is_boolean(&self) -> bool {
-        matches!(self, Self::Boolean(_))
+        matches!(self.0, Value::Boolean(_))
     }
 
-    /// Returns true if the value is an object
+    /// Returns true if the value is a 32-bit signed integer number.
     #[inline]
-    pub fn is_object(&self) -> bool {
-        matches!(self, Self::Object(_))
+    pub fn is_integer32(&self) -> bool {
+        matches!(self.0, Value::Integer32(_))
+    }
+
+    /// Returns true if the value is a 64-bit floating-point number.
+    #[inline]
+    pub fn is_float64(&self) -> bool {
+        matches!(self.0, Value::Float64(_))
+    }
+
+    /// Returns true if the value is a 64-bit floating-point `NaN` number.
+    #[inline]
+    pub fn is_nan(&self) -> bool {
+        matches!(self.0, Value::Float64(r) if r.is_nan())
     }
 
     /// Returns true if the value is a string.
     #[inline]
     pub fn is_string(&self) -> bool {
-        matches!(self, Self::String(_))
-    }
-
-    /// Returns true if the value is a symbol.
-    #[inline]
-    pub fn is_symbol(&self) -> bool {
-        matches!(self, Self::Symbol(_))
+        matches!(self.0, Value::String(_))
     }
 
     /// Returns true if the value is a bigint.
     #[inline]
     pub fn is_bigint(&self) -> bool {
-        matches!(self, Self::BigInt(_))
+        matches!(self.0, Value::BigInt(_))
     }
 
+    /// Returns true if the value is a symbol.
+    #[inline]
+    pub fn is_symbol(&self) -> bool {
+        matches!(self.0, Value::Symbol(_))
+    }
+
+    /// Returns true if the value is an object
+    #[inline]
+    pub fn is_object(&self) -> bool {
+        matches!(self.0, Value::Object(_))
+    }
+
+    /// Returns a [`JsVariant`] enum representing the current variant of the value.
+    ///
+    /// # Note
+    ///
+    /// More exotic implementations of [`JsValue`] cannot use direct references to
+    /// heap based types, so [`JsVariant`] instead returns [`Ref`]s on those cases.
     pub fn variant(&self) -> JsVariant<'_> {
-        match self {
-            Self::Null => JsVariant::Null,
-            Self::Undefined => JsVariant::Undefined,
-            Self::Integer(i) => JsVariant::Integer(*i),
-            Self::Rational(d) => JsVariant::Rational(*d),
-            Self::Boolean(b) => JsVariant::Boolean(*b),
-            Self::Object(inner) => JsVariant::Object(Ref { inner }),
-            Self::String(inner) => JsVariant::String(Ref { inner }),
-            Self::Symbol(inner) => JsVariant::Symbol(Ref { inner }),
-            Self::BigInt(inner) => JsVariant::BigInt(Ref { inner }),
+        match self.0 {
+            Value::Null => JsVariant::Null,
+            Value::Undefined => JsVariant::Undefined,
+            Value::Integer32(i) => JsVariant::Integer32(i),
+            Value::Float64(d) => JsVariant::Float64(d),
+            Value::Boolean(b) => JsVariant::Boolean(b),
+            Value::Object(ref inner) => JsVariant::Object(Ref { inner }),
+            Value::String(ref inner) => JsVariant::String(Ref { inner }),
+            Value::Symbol(ref inner) => JsVariant::Symbol(Ref { inner }),
+            Value::BigInt(ref inner) => JsVariant::BigInt(Ref { inner }),
         }
     }
 }
 
-/// Represents a reference to a pointer type inside a [`JsValue`]
+/// Represents a reference to a boxed pointer type inside a [`JsValue`]
+///
+/// This is exclusively used to return references to [`JsString`], [`JsObject`],
+/// [`JsSymbol`] and [`JsBigInt`], since some [`JsValue`] implementations makes
+/// returning proper references difficult.
+/// It is mainly returned by the [`JsValue::variant`] method and the
+/// `as_` methods for checked casts to pointer types.
 ///
 /// [`Ref`] implements [`Deref`][`std::ops::Deref`], which facilitates conversion
 /// to a proper [`reference`] by using the `ref` keyword or the

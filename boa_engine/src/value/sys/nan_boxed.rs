@@ -61,8 +61,8 @@ const MASK_POINTER_PAYLOAD: usize = 0x0000FFFFFFFFFFFF;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u16)]
 enum ValueTag {
-    Double = (DOUBLE_TYPE >> 48) as _,
-    Integer = (INTEGER_TYPE >> 48) as _,
+    Float64 = (DOUBLE_TYPE >> 48) as _,
+    Integer32 = (INTEGER_TYPE >> 48) as _,
     Boolean = (BOOLEAN_TYPE >> 48) as _,
     Undefined = (UNDEFINED_TYPE >> 48) as _,
     Null = (NULL_TYPE >> 48) as _,
@@ -79,6 +79,8 @@ enum ValueTag {
 }
 
 /// A Javascript value
+///
+/// Check the [`value`][`super::super`] module for more information.
 #[derive(Debug)]
 #[repr(transparent)]
 pub struct JsValue {
@@ -86,15 +88,7 @@ pub struct JsValue {
 }
 
 impl JsValue {
-    /// Creates a new `undefined` value.
-    #[inline]
-    pub const fn undefined() -> Self {
-        Self {
-            value: Cell::new(sptr::invalid_mut(UNDEFINED_TYPE)),
-        }
-    }
-
-    /// Creates a new `null` value.
+    /// `null` - A null value, for when a value doesn't exist.
     #[inline]
     pub const fn null() -> Self {
         Self {
@@ -102,38 +96,15 @@ impl JsValue {
         }
     }
 
-    /// Creates a new number with `NaN` value.
+    /// `undefined` - An undefined value, for when a field or index doesn't exist
     #[inline]
-    pub const fn nan() -> Self {
+    pub const fn undefined() -> Self {
         Self {
-            value: Cell::new(sptr::invalid_mut(CANONICALIZED_NAN)),
+            value: Cell::new(sptr::invalid_mut(UNDEFINED_TYPE)),
         }
     }
 
-    #[inline]
-    pub fn rational(rational: f64) -> Self {
-        if rational.is_nan() {
-            return Self::nan();
-        }
-
-        let value = Self {
-            value: Cell::new(sptr::invalid_mut(rational.to_bits() as usize)),
-        };
-        debug_assert!(value.is_rational());
-        debug_assert_eq!(value.tag(), ValueTag::Double);
-        value
-    }
-
-    #[inline]
-    pub fn integer(integer: i32) -> Self {
-        let value = Self {
-            value: Cell::new(sptr::invalid_mut(integer as u32 as usize | INTEGER_TYPE)),
-        };
-        debug_assert!(value.is_integer());
-        debug_assert_eq!(value.tag(), ValueTag::Integer);
-        value
-    }
-
+    /// `boolean` - A `true` / `false` value.
     #[inline]
     pub fn boolean(boolean: bool) -> Self {
         let value = Self {
@@ -144,6 +115,83 @@ impl JsValue {
         value
     }
 
+    /// `integer32` - A 32-bit integer value, such as `42`.
+    #[inline]
+    pub fn integer32(integer32: i32) -> Self {
+        let value = Self {
+            value: Cell::new(sptr::invalid_mut(integer32 as u32 as usize | INTEGER_TYPE)),
+        };
+        debug_assert!(value.is_integer32());
+        debug_assert_eq!(value.tag(), ValueTag::Integer32);
+        value
+    }
+
+    /// `float64` - A 64-bit floating point number value, such as `3.1415`
+    #[inline]
+    pub fn float64(float64: f64) -> Self {
+        if float64.is_nan() {
+            return Self::nan();
+        }
+
+        let value = Self {
+            value: Cell::new(sptr::invalid_mut(float64.to_bits() as usize)),
+        };
+        debug_assert!(value.is_float64());
+        debug_assert_eq!(value.tag(), ValueTag::Float64);
+        value
+    }
+
+    /// Creates a new [`f64`] value equal to `NaN`.
+    #[inline]
+    pub const fn nan() -> Self {
+        Self {
+            value: Cell::new(sptr::invalid_mut(CANONICALIZED_NAN)),
+        }
+    }
+
+    /// `String` - A [`JsString`] value, such as `"Hello, world"`.
+    #[inline]
+    pub fn string(string: JsString) -> Self {
+        let string = ManuallyDrop::new(string);
+        let pointer = unsafe { JsString::into_void_ptr(string) };
+        debug_assert_eq!(pointer.addr() & MASK_POINTER_PAYLOAD, pointer.addr());
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | STRING_TYPE)),
+        };
+        debug_assert!(value.is_string());
+        debug_assert_eq!(value.tag(), ValueTag::String);
+        value
+    }
+
+    /// `BigInt` - A [`JsBigInt`] value, an arbitrarily large signed integer.
+    #[inline]
+    pub fn bigint(bigint: JsBigInt) -> Self {
+        let bigint = ManuallyDrop::new(bigint);
+        let pointer = unsafe { JsBigInt::into_void_ptr(bigint) };
+        debug_assert_eq!(pointer.addr() & MASK_POINTER_PAYLOAD, pointer.addr());
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | BIGINT_TYPE)),
+        };
+        debug_assert!(value.is_bigint());
+        debug_assert_eq!(value.tag(), ValueTag::BigInt);
+        value
+    }
+
+    /// `Symbol` - A [`JsSymbol`] value.
+    #[inline]
+    pub fn symbol(symbol: JsSymbol) -> Self {
+        let symbol = ManuallyDrop::new(symbol);
+        let pointer = unsafe { JsSymbol::into_void_ptr(symbol) };
+        debug_assert_eq!(pointer.addr() & MASK_POINTER_PAYLOAD, pointer.addr());
+        let value = Self {
+            value: Cell::new(pointer.map_addr(|addr| addr | SYMBOL_TYPE)),
+        };
+        debug_assert!(value.is_symbol());
+        debug_assert_eq!(value.tag(), ValueTag::Symbol);
+        value
+    }
+
+    /// `Object` - A [`JsObject`], such as `Math`, represented by a binary tree of string keys to Javascript values.
     #[inline]
     pub fn object(object: JsObject) -> Self {
         let object = ManuallyDrop::new(object);
@@ -158,61 +206,8 @@ impl JsValue {
         value
     }
 
-    #[inline]
-    pub fn string(string: JsString) -> Self {
-        let string = ManuallyDrop::new(string);
-        let pointer = unsafe { JsString::into_void_ptr(string) };
-        debug_assert_eq!(pointer.addr() & MASK_POINTER_PAYLOAD, pointer.addr());
-        let value = Self {
-            value: Cell::new(pointer.map_addr(|addr| addr | STRING_TYPE)),
-        };
-        debug_assert!(value.is_string());
-        debug_assert_eq!(value.tag(), ValueTag::String);
-        value
-    }
-
-    #[inline]
-    pub fn symbol(symbol: JsSymbol) -> Self {
-        let symbol = ManuallyDrop::new(symbol);
-        let pointer = unsafe { JsSymbol::into_void_ptr(symbol) };
-        debug_assert_eq!(pointer.addr() & MASK_POINTER_PAYLOAD, pointer.addr());
-        let value = Self {
-            value: Cell::new(pointer.map_addr(|addr| addr | SYMBOL_TYPE)),
-        };
-        debug_assert!(value.is_symbol());
-        debug_assert_eq!(value.tag(), ValueTag::Symbol);
-        value
-    }
-
-    #[inline]
-    pub fn bigint(bigint: JsBigInt) -> Self {
-        let bigint = ManuallyDrop::new(bigint);
-        let pointer = unsafe { JsBigInt::into_void_ptr(bigint) };
-        debug_assert_eq!(pointer.addr() & MASK_POINTER_PAYLOAD, pointer.addr());
-        let value = Self {
-            value: Cell::new(pointer.map_addr(|addr| addr | BIGINT_TYPE)),
-        };
-        debug_assert!(value.is_bigint());
-        debug_assert_eq!(value.tag(), ValueTag::BigInt);
-        value
-    }
-
-    pub fn as_rational(&self) -> Option<f64> {
-        if self.is_rational() {
-            return Some(self.as_rational_unchecked());
-        }
-
-        None
-    }
-
-    pub fn as_i32(&self) -> Option<i32> {
-        if self.is_i32() {
-            return Some(self.as_i32_uncheched());
-        }
-
-        None
-    }
-
+    /// Returns the internal [`bool`] if the value is a boolean, or
+    /// [`None`] otherwise.
     #[inline]
     pub fn as_boolean(&self) -> Option<bool> {
         if self.is_boolean() {
@@ -222,15 +217,28 @@ impl JsValue {
         None
     }
 
-    pub fn as_object(&self) -> Option<Ref<'_, JsObject>> {
-        if self.is_object() {
-            return unsafe { Some(self.as_object_unchecked()) };
+    /// Returns the internal [`i32`] if the value is a 32-bit signed integer number, or
+    /// [`None`] otherwise.
+    pub fn as_integer32(&self) -> Option<i32> {
+        if self.is_integer32() {
+            return Some(self.as_integer32_uncheched());
         }
 
         None
     }
 
-    /// Returns the string if the values is a string, otherwise `None`.
+    /// Returns the internal [`f64`] if the value is a 64-bit floating-point number, or
+    /// [`None`] otherwise.
+    pub fn as_float64(&self) -> Option<f64> {
+        if self.is_float64() {
+            return Some(self.as_float64_unchecked());
+        }
+
+        None
+    }
+
+    /// Returns a reference to the internal [`JsString`] if the value is a string, or
+    /// [`None`] otherwise.
     #[inline]
     pub fn as_string(&self) -> Option<Ref<'_, JsString>> {
         if self.is_string() {
@@ -240,14 +248,8 @@ impl JsValue {
         None
     }
 
-    pub fn as_symbol(&self) -> Option<Ref<'_, JsSymbol>> {
-        if self.is_symbol() {
-            return unsafe { Some(self.as_symbol_unchecked()) };
-        }
-
-        None
-    }
-
+    /// Returns a reference to the internal [`JsBigInt`] if the value is a big int, or
+    /// [`None`] otherwise.
     pub fn as_bigint(&self) -> Option<Ref<'_, JsBigInt>> {
         if self.is_bigint() {
             return unsafe { Some(self.as_bigint_unchecked()) };
@@ -256,10 +258,24 @@ impl JsValue {
         None
     }
 
-    /// Returns true if the value is undefined.
-    #[inline]
-    pub fn is_undefined(&self) -> bool {
-        self.value.get().addr() == UNDEFINED_TYPE
+    /// Returns a reference to the internal [`JsSymbol`] if the value is a symbol, or
+    /// [`None`] otherwise.
+    pub fn as_symbol(&self) -> Option<Ref<'_, JsSymbol>> {
+        if self.is_symbol() {
+            return unsafe { Some(self.as_symbol_unchecked()) };
+        }
+
+        None
+    }
+
+    /// Returns a reference to the internal [`JsObject`] if the value is an object, or
+    /// [`None`] otherwise.
+    pub fn as_object(&self) -> Option<Ref<'_, JsObject>> {
+        if self.is_object() {
+            return unsafe { Some(self.as_object_unchecked()) };
+        }
+
+        None
     }
 
     /// Returns true if the value is null.
@@ -268,16 +284,10 @@ impl JsValue {
         self.value.get().addr() == NULL_TYPE
     }
 
-    pub fn is_rational(&self) -> bool {
-        (self.value.get().addr() & !SIGN_BIT) <= QNAN
-    }
-
-    pub fn is_nan(&self) -> bool {
-        self.value.get().addr() == CANONICALIZED_NAN
-    }
-
-    pub fn is_i32(&self) -> bool {
-        self.value.get().addr() & TAG_MASK == INTEGER_TYPE
+    /// Returns true if the value is undefined.
+    #[inline]
+    pub fn is_undefined(&self) -> bool {
+        self.value.get().addr() == UNDEFINED_TYPE
     }
 
     /// Returns true if the value is a boolean.
@@ -286,10 +296,19 @@ impl JsValue {
         self.value.get().addr() & TAG_MASK == BOOLEAN_TYPE
     }
 
-    /// Returns true if the value is an object
-    #[inline]
-    pub fn is_object(&self) -> bool {
-        self.value.get().addr() & TAG_MASK == OBJECT_TYPE
+    /// Returns true if the value is a 32-bit signed integer number.
+    pub fn is_integer32(&self) -> bool {
+        self.value.get().addr() & TAG_MASK == INTEGER_TYPE
+    }
+
+    /// Returns true if the value is a 64-bit floating-point number.
+    pub fn is_float64(&self) -> bool {
+        (self.value.get().addr() & !SIGN_BIT) <= QNAN
+    }
+
+    /// Returns true if the value is a 64-bit floating-point `NaN` number.
+    pub fn is_nan(&self) -> bool {
+        self.value.get().addr() == CANONICALIZED_NAN
     }
 
     /// Returns true if the value is a string.
@@ -298,23 +317,36 @@ impl JsValue {
         self.value.get().addr() & TAG_MASK == STRING_TYPE
     }
 
-    pub fn is_symbol(&self) -> bool {
-        self.value.get().addr() & TAG_MASK == SYMBOL_TYPE
-    }
-
     /// Returns true if the value is a bigint.
     #[inline]
     pub fn is_bigint(&self) -> bool {
         self.value.get().addr() & TAG_MASK == BIGINT_TYPE
     }
 
+    /// Returns true if the value is a symbol.
+    pub fn is_symbol(&self) -> bool {
+        self.value.get().addr() & TAG_MASK == SYMBOL_TYPE
+    }
+
+    /// Returns true if the value is an object
+    #[inline]
+    pub fn is_object(&self) -> bool {
+        self.value.get().addr() & TAG_MASK == OBJECT_TYPE
+    }
+
+    /// Returns a [`JsVariant`] enum representing the current variant of the value.
+    ///
+    /// # Note
+    ///
+    /// More exotic implementations of [`JsValue`] cannot use direct references to
+    /// heap based types, so [`JsVariant`] instead returns [`Ref`]s on those cases.
     pub fn variant(&self) -> JsVariant<'_> {
         unsafe {
             match self.tag() {
                 ValueTag::Null => JsVariant::Null,
                 ValueTag::Undefined => JsVariant::Undefined,
-                ValueTag::Integer => JsVariant::Integer(self.as_i32_uncheched()),
-                ValueTag::Double => JsVariant::Rational(self.as_rational_unchecked()),
+                ValueTag::Integer32 => JsVariant::Integer32(self.as_integer32_uncheched()),
+                ValueTag::Float64 => JsVariant::Float64(self.as_float64_unchecked()),
                 ValueTag::Boolean => JsVariant::Boolean(self.as_boolean_uncheched()),
                 ValueTag::Object => JsVariant::Object(self.as_object_unchecked()),
                 ValueTag::String => JsVariant::String(self.as_string_unchecked()),
@@ -331,34 +363,23 @@ impl JsValue {
     }
 
     fn tag(&self) -> ValueTag {
-        if self.is_rational() {
-            return ValueTag::Double;
+        if self.is_float64() {
+            return ValueTag::Float64;
         }
         let tag = ((self.value.get().addr() & TAG_MASK) >> 48) as u16;
         ValueTag::try_from(tag).expect("Implementation must never construct an invalid tag")
-    }
-
-    fn as_rational_unchecked(&self) -> f64 {
-        f64::from_bits(self.value.get().addr() as u64)
-    }
-
-    fn as_i32_uncheched(&self) -> i32 {
-        (self.value.get().addr() & MASK_INT_PAYLOAD) as u32 as i32
     }
 
     fn as_boolean_uncheched(&self) -> bool {
         (self.value.get().addr() & 0xFF) != 0
     }
 
-    /// Returns a reference to the boxed [`JsObject`] without checking
-    /// if the tag of `self` is valid.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with a [`JsValue`] that doesn't box
-    /// a [`JsObject`] is undefined behaviour.
-    unsafe fn as_object_unchecked(&self) -> Ref<'_, JsObject> {
-        unsafe { Ref::new(JsObject::from_void_ptr(self.as_pointer())) }
+    fn as_integer32_uncheched(&self) -> i32 {
+        (self.value.get().addr() & MASK_INT_PAYLOAD) as u32 as i32
+    }
+
+    fn as_float64_unchecked(&self) -> f64 {
+        f64::from_bits(self.value.get().addr() as u64)
     }
 
     /// Returns a reference to the boxed [`JsString`] without checking
@@ -372,17 +393,6 @@ impl JsValue {
         unsafe { Ref::new(JsString::from_void_ptr(self.as_pointer())) }
     }
 
-    /// Returns a reference to the boxed [`JsSymbol`] without checking
-    /// if the tag of `self` is valid.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with a [`JsValue`] that doesn't box
-    /// a [`JsSymbol`] is undefined behaviour.
-    unsafe fn as_symbol_unchecked(&self) -> Ref<'_, JsSymbol> {
-        unsafe { Ref::new(JsSymbol::from_void_ptr(self.as_pointer())) }
-    }
-
     /// Returns a reference to the boxed [`JsBigInt`] without checking
     /// if the tag of `self` is valid.
     ///
@@ -394,6 +404,28 @@ impl JsValue {
     unsafe fn as_bigint_unchecked(&self) -> Ref<'_, JsBigInt> {
         // SAFETY: The safety contract must be upheld by the caller
         unsafe { Ref::new(JsBigInt::from_void_ptr(self.as_pointer())) }
+    }
+
+    /// Returns a reference to the boxed [`JsSymbol`] without checking
+    /// if the tag of `self` is valid.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with a [`JsValue`] that doesn't box
+    /// a [`JsSymbol`] is undefined behaviour.
+    unsafe fn as_symbol_unchecked(&self) -> Ref<'_, JsSymbol> {
+        unsafe { Ref::new(JsSymbol::from_void_ptr(self.as_pointer())) }
+    }
+
+    /// Returns a reference to the boxed [`JsObject`] without checking
+    /// if the tag of `self` is valid.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with a [`JsValue`] that doesn't box
+    /// a [`JsObject`] is undefined behaviour.
+    unsafe fn as_object_unchecked(&self) -> Ref<'_, JsObject> {
+        unsafe { Ref::new(JsObject::from_void_ptr(self.as_pointer())) }
     }
 }
 
@@ -486,8 +518,9 @@ unsafe impl Trace for JsValue {
 /// Represents a reference to a boxed pointer type inside a [`JsValue`]
 ///
 /// This is exclusively used to return references to [`JsString`], [`JsObject`],
-/// [`JsSymbol`] and [`JsBigInt`], since `NaN` boxing makes returning proper references
-/// difficult. It is mainly returned by the [`JsValue::variant`] method and the
+/// [`JsSymbol`] and [`JsBigInt`], since some [`JsValue`] implementations makes
+/// returning proper references difficult.
+/// It is mainly returned by the [`JsValue::variant`] method and the
 /// `as_` methods for checked casts to pointer types.
 ///
 /// [`Ref`] implements [`Deref`][`std::ops::Deref`], which facilitates conversion
@@ -557,8 +590,8 @@ mod tests_nan_box {
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
-        assert!(!value.is_rational());
+        assert!(!value.is_integer32());
+        assert!(!value.is_float64());
         assert!(!value.is_boolean());
         assert!(!value.is_object());
         assert!(!value.is_string());
@@ -578,8 +611,8 @@ mod tests_nan_box {
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
-        assert!(!value.is_rational());
+        assert!(!value.is_integer32());
+        assert!(!value.is_float64());
         assert!(!value.is_boolean());
         assert!(!value.is_object());
         assert!(!value.is_string());
@@ -598,8 +631,8 @@ mod tests_nan_box {
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
-        assert!(!value.is_rational());
+        assert!(!value.is_integer32());
+        assert!(!value.is_float64());
         assert!(!value.is_boolean());
         assert!(!value.is_object());
 
@@ -624,8 +657,8 @@ mod tests_nan_box {
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
-        assert!(!value.is_rational());
+        assert!(!value.is_integer32());
+        assert!(!value.is_float64());
         assert!(!value.is_boolean());
 
         assert!(value.is_object());
@@ -641,8 +674,8 @@ mod tests_nan_box {
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
-        assert!(!value.is_rational());
+        assert!(!value.is_integer32());
+        assert!(!value.is_float64());
 
         assert!(value.is_boolean());
         assert_eq!(value.as_boolean(), Some(true));
@@ -652,48 +685,48 @@ mod tests_nan_box {
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
-        assert!(!value.is_rational());
+        assert!(!value.is_integer32());
+        assert!(!value.is_float64());
 
         assert!(value.is_boolean());
         assert_eq!(value.as_boolean(), Some(false));
     }
 
     #[test]
-    fn rational() {
+    fn float64() {
         let value = JsValue::new(1.3);
 
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
-        assert!(!value.is_i32());
+        assert!(!value.is_integer32());
 
-        assert!(value.is_rational());
-        assert_eq!(value.as_rational(), Some(1.3));
+        assert!(value.is_float64());
+        assert_eq!(value.as_float64(), Some(1.3));
 
         let value = JsValue::new(f64::MAX);
-        assert!(value.is_rational());
-        assert_eq!(value.as_rational(), Some(f64::MAX));
+        assert!(value.is_float64());
+        assert_eq!(value.as_float64(), Some(f64::MAX));
 
         let value = JsValue::new(f64::MIN);
-        assert!(value.is_rational());
-        assert_eq!(value.as_rational(), Some(f64::MIN));
+        assert!(value.is_float64());
+        assert_eq!(value.as_float64(), Some(f64::MIN));
 
         let value = JsValue::nan();
-        assert!(value.is_rational());
-        assert!(value.as_rational().unwrap().is_nan());
+        assert!(value.is_float64());
+        assert!(value.as_float64().unwrap().is_nan());
 
         let value = JsValue::new(12345);
-        assert!(!value.is_rational());
-        assert_eq!(value.as_rational(), None);
+        assert!(!value.is_float64());
+        assert_eq!(value.as_float64(), None);
 
         let value = JsValue::undefined();
-        assert!(!value.is_rational());
-        assert_eq!(value.as_rational(), None);
+        assert!(!value.is_float64());
+        assert_eq!(value.as_float64(), None);
 
         let value = JsValue::null();
-        assert!(!value.is_rational());
-        assert_eq!(value.as_rational(), None);
+        assert!(!value.is_float64());
+        assert_eq!(value.as_float64(), None);
     }
 
     #[test]
@@ -716,18 +749,18 @@ mod tests_nan_box {
     }
 
     #[test]
-    fn integer() {
+    fn integer32() {
         let value = JsValue::new(-0xcafe);
 
         assert!(!value.is_null());
         assert!(!value.is_null_or_undefined());
         assert!(!value.is_undefined());
 
-        assert!(value.is_i32());
+        assert!(value.is_integer32());
 
-        assert_eq!(value.as_i32(), Some(-0xcafe));
+        assert_eq!(value.as_integer32(), Some(-0xcafe));
 
         let value = JsValue::null();
-        assert_eq!(value.as_i32(), None);
+        assert_eq!(value.as_integer32(), None);
     }
 }

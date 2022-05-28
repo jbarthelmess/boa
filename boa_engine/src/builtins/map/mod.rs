@@ -223,7 +223,7 @@ impl Map {
             // 3. Let entries be the List that is M.[[MapData]].
             if let Some(map) = object.borrow_mut().as_map_mut() {
                 let key = match key.variant() {
-                    JsVariant::Rational(r) => {
+                    JsVariant::Float64(r) => {
                         // 5. If key is -0𝔽, set key to +0𝔽.
                         if r.is_zero() {
                             JsValue::new(0f64)
@@ -329,7 +329,7 @@ impl Map {
     ) -> JsResult<JsValue> {
         let key = args.get_or_undefined(0);
         let key = match key.variant() {
-            JsVariant::Rational(r) if r.is_zero() => JsValue::new(0f64),
+            JsVariant::Float64(r) if r.is_zero() => JsValue::new(0f64),
             _ => key.clone(),
         };
 
@@ -393,7 +393,7 @@ impl Map {
     ) -> JsResult<JsValue> {
         let key = args.get_or_undefined(0);
         let key = match key.variant() {
-            JsVariant::Rational(r) if r.is_zero() => JsValue::new(0f64),
+            JsVariant::Float64(r) if r.is_zero() => JsValue::new(0f64),
             _ => key.clone(),
         };
 

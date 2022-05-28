@@ -109,8 +109,8 @@ impl JsValue {
             JsVariant::Undefined => todo!("undefined to JSON"),
             JsVariant::Boolean(b) => Ok(b.into()),
             JsVariant::String(string) => Ok(string.as_str().into()),
-            JsVariant::Rational(rat) => Ok(rat.into()),
-            JsVariant::Integer(int) => Ok(int.into()),
+            JsVariant::Float64(rat) => Ok(rat.into()),
+            JsVariant::Integer32(int) => Ok(int.into()),
             JsVariant::BigInt(_bigint) => context.throw_type_error("cannot convert bigint to JSON"),
             JsVariant::Object(obj) => {
                 if obj.is_array() {

@@ -42,9 +42,9 @@ impl Hash for JsValue {
             JsVariant::Null => NullHashable.hash(state),
             JsVariant::String(string) => string.hash(state),
             JsVariant::Boolean(boolean) => boolean.hash(state),
-            JsVariant::Integer(integer) => RationalHashable(f64::from(integer)).hash(state),
+            JsVariant::Integer32(integer) => RationalHashable(f64::from(integer)).hash(state),
             JsVariant::BigInt(bigint) => bigint.hash(state),
-            JsVariant::Rational(rational) => RationalHashable(rational).hash(state),
+            JsVariant::Float64(rational) => RationalHashable(rational).hash(state),
             JsVariant::Symbol(symbol) => Hash::hash(&*symbol, state),
             JsVariant::Object(object) => std::ptr::hash(object.as_ref(), state),
         }
