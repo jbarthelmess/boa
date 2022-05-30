@@ -42,9 +42,17 @@ use std::mem::ManuallyDrop;
 // Ref<'a, T> type
 
 cfg_if::cfg_if! {
-    if #[cfg(all(target_arch = "x86_64", target_pointer_width = "64", feature = "nan_boxing", not(doc)))] {
-        #[path = "nan_boxed.rs"]
-        mod r#impl;
+    if #[cfg(all(feature = "nan_boxing", not(doc)))] {
+        cfg_if::cfg_if! {
+            if #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))] {
+
+                #[path = "nan_boxed.rs"]
+                mod r#impl;
+
+            } else {
+                compile_error!("This platform doesn't support NaN-boxing.");
+            }
+        }
     } else {
         #[path = "default.rs"]
         mod r#impl;
