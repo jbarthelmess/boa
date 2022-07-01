@@ -1440,6 +1440,8 @@ impl String {
     /// [spec]: https://tc39.es/ecma262/#sec-string.prototype.trim
     /// [mdn]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/trim
     pub(crate) fn trim(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+        // 1. Let S be the this value.
+        // 2. Return ? TrimString(S, start+end).
         let object = this.require_object_coercible(context)?;
         let string = object.to_string(context)?;
         Ok(js_string!(string.trim()).into())
@@ -1462,6 +1464,8 @@ impl String {
         _: &[JsValue],
         context: &mut Context,
     ) -> JsResult<JsValue> {
+        // 1. Let S be the this value.
+        // 2. Return ? TrimString(S, start).
         let object = this.require_object_coercible(context)?;
         let string = object.to_string(context)?;
         Ok(js_string!(string.trim_start()).into())
@@ -1484,6 +1488,8 @@ impl String {
         _: &[JsValue],
         context: &mut Context,
     ) -> JsResult<JsValue> {
+        // 1. Let S be the this value.
+        // 2. Return ? TrimString(S, end).
         let object = this.require_object_coercible(context)?;
         let string = object.to_string(context)?;
         Ok(js_string!(string.trim_end()).into())
@@ -1511,7 +1517,7 @@ impl String {
         // 2. Let S be ? ToString(O).
         let string = this.to_string(context)?;
 
-        let mut code_points = string.to_code_points();
+        let mut code_points = string.code_points();
         let mut lower_text = Vec::with_capacity(string.len());
         let mut next_unpaired_surrogate = None;
 
@@ -1574,7 +1580,7 @@ impl String {
         // 2. Let S be ? ToString(O).
         let string = this.to_string(context)?;
 
-        let mut code_points = string.to_code_points();
+        let mut code_points = string.code_points();
         let mut upper_text = Vec::with_capacity(string.len());
         let mut next_unpaired_surrogate = None;
 
@@ -1971,7 +1977,7 @@ impl String {
             }
         };
 
-        let mut code_points = s.to_code_points();
+        let mut code_points = s.code_points();
         let mut result = Vec::with_capacity(s.len());
 
         let mut next_unpaired_surrogate = None;
@@ -2110,7 +2116,7 @@ pub(crate) fn get_substitution(
     //     These $ replacements are done left-to-right, and, once such a replacement is performed,
     //     the new replacement text is not subject to further replacements.
     let mut result = vec![];
-    let mut chars = replacement.to_code_points().peekable();
+    let mut chars = replacement.code_points().peekable();
 
     while let Some(first) = chars.next() {
         if first == CodePoint::Unicode('$') {
