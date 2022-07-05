@@ -664,9 +664,9 @@ impl RegExp {
             let mut buf = [0; 2];
             for c in src.code_points() {
                 match c {
-                    CodePoint::Unicode('/') => s.extend_from_slice(utf16!(r"\/")),
-                    CodePoint::Unicode('\n') => s.extend_from_slice(utf16!(r"\\n")),
-                    CodePoint::Unicode('\r') => s.extend_from_slice(utf16!(r"\\r")),
+                    CodePoint::Unicode('/') => s.extend_from_slice(&utf16!(r"\/")),
+                    CodePoint::Unicode('\n') => s.extend_from_slice(&utf16!(r"\\n")),
+                    CodePoint::Unicode('\r') => s.extend_from_slice(&utf16!(r"\\r")),
                     CodePoint::Unicode(c) => s.extend_from_slice(c.encode_utf16(&mut buf)),
                     CodePoint::UnpairedSurrogate(surr) => s.push(surr),
                 }
@@ -1144,7 +1144,7 @@ impl RegExp {
                 this.display()
             ));
         };
-        Ok(js_string!(utf16!("/"), &body, utf16!("/"), &flags).into())
+        Ok(js_string!(&utf16!("/"), &body, &utf16!("/"), &flags).into())
     }
 
     /// `RegExp.prototype[ @@matchAll ]( string )`
@@ -1528,7 +1528,7 @@ impl RegExp {
         let new_flags = if flags.contains(&('y' as u16)) {
             flags
         } else {
-            js_string!(&flags, utf16!("y"))
+            js_string!(&flags, &utf16!("y"))
         };
 
         // 10. Let splitter be ? Construct(C, « rx, newFlags »).

@@ -461,7 +461,7 @@ pub(crate) fn create_function_object(
             context
                 .interner()
                 .resolve_expect(code.name)
-                .into_common::<JsString>(),
+                .into_common::<JsString>(false),
         )
         .writable(false)
         .enumerable(false)
@@ -555,7 +555,7 @@ pub(crate) fn create_generator_function_object(
             context
                 .interner()
                 .resolve_expect(code.name)
-                .into_common::<JsString>(),
+                .into_common::<JsString>(false),
         )
         .writable(false)
         .enumerable(false)

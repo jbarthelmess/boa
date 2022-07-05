@@ -1,3 +1,4 @@
+use crate::string::utf16;
 use crate::syntax::{
     ast::node::{FormalParameterList, FunctionDecl},
     parser::tests::check_parser,
@@ -11,7 +12,7 @@ fn function_declaration() {
     check_parser(
         "function hello() {}",
         vec![FunctionDecl::new(
-            interner.get_or_intern_static("hello"),
+            interner.get_or_intern_static("hello", &utf16!("hello")),
             FormalParameterList::default(),
             vec![],
         )
@@ -27,7 +28,7 @@ fn function_declaration_keywords() {
     check_parser(
         "function yield() {}",
         vec![FunctionDecl::new(
-            interner.get_or_intern_static("yield"),
+            interner.get_or_intern_static("yield", &utf16!("yield")),
             FormalParameterList::default(),
             vec![],
         )
@@ -39,7 +40,7 @@ fn function_declaration_keywords() {
     check_parser(
         "function await() {}",
         vec![FunctionDecl::new(
-            interner.get_or_intern_static("await"),
+            interner.get_or_intern_static("await", &utf16!("await")),
             FormalParameterList::default(),
             vec![],
         )
